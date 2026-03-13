@@ -4,22 +4,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
-private val DroneDarkColors = darkColorScheme(
-    primary        = DronePrimary,
-    onPrimary      = DroneBackground,
-    background     = DroneBackground,
-    onBackground   = DroneTextPrimary,
-    surface        = DroneSurface,
-    onSurface      = DroneTextPrimary,
-    surfaceVariant = DroneCard,
-    error          = DroneError,
-    onError        = DroneTextPrimary,
+private val BhqColorScheme = darkColorScheme(
+    primary        = BhqCyan,
+    onPrimary      = BhqNavy,
+    background     = BhqNavy,
+    onBackground   = BhqWhite,
+    surface        = BhqNavyMid,
+    onSurface      = BhqWhite,
+    surfaceVariant = BhqNavyLight,
+    error          = BhqRed,
+    onError        = BhqWhite,
 )
 
 @Composable
 fun DroneDumpTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = DroneDarkColors,
+        colorScheme = BhqColorScheme,
         content = content
     )
 }

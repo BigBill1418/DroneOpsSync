@@ -23,22 +23,22 @@ fun SettingsScreen(
     prefs: SharedPreferences,
     onBack: () -> Unit
 ) {
-    val currentServerUrl  by viewModel.serverUrl.collectAsState()
-    val currentLogPaths   by viewModel.logPathsText.collectAsState()
+    val currentServerUrl by viewModel.serverUrl.collectAsState()
+    val currentLogPaths  by viewModel.logPathsText.collectAsState()
 
-    var serverUrl  by remember(currentServerUrl)  { mutableStateOf(currentServerUrl) }
-    var logPaths   by remember(currentLogPaths)   { mutableStateOf(currentLogPaths) }
-    var saved      by remember { mutableStateOf(false) }
+    var serverUrl by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
+    var logPaths  by remember(currentLogPaths)  { mutableStateOf(currentLogPaths) }
+    var saved     by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = DroneBackground,
+        containerColor = BhqNavy,
         topBar = {
             TopAppBar(
-                title = { Text("Settings", color = DroneTextPrimary, fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DroneSurface),
+                title = { Text("Settings", color = BhqWhite, fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = BhqNavyMid),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = DroneTextSecondary)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = BhqGrey)
                     }
                 },
                 actions = {
@@ -46,7 +46,7 @@ fun SettingsScreen(
                         viewModel.saveSettings(prefs, serverUrl, logPaths)
                         saved = true
                     }) {
-                        Icon(Icons.Default.Save, contentDescription = "Save", tint = DronePrimary)
+                        Icon(Icons.Default.Save, contentDescription = "Save", tint = BhqCyan)
                     }
                 }
             )
@@ -61,10 +61,10 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             if (saved) {
-                Card(colors = CardDefaults.cardColors(containerColor = DroneVerified.copy(alpha = 0.15f))) {
+                Card(colors = CardDefaults.cardColors(containerColor = BhqGreen.copy(alpha = 0.12f))) {
                     Text(
                         "Settings saved",
-                        color = DroneVerified,
+                        color = BhqGreen,
                         modifier = Modifier.padding(12.dp),
                         fontWeight = FontWeight.Bold
                     )
@@ -73,35 +73,35 @@ fun SettingsScreen(
 
             // Server URL
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("NAS Server URL", color = DronePrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("NAS Server URL", color = BhqCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
                     "IP address and port of your Synology running DroneDump Server",
-                    color = DroneTextSecondary, fontSize = 13.sp
+                    color = BhqGrey, fontSize = 13.sp
                 )
                 OutlinedTextField(
                     value = serverUrl,
                     onValueChange = { serverUrl = it; saved = false },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("http://192.168.1.100:7474", color = DroneTextSecondary) },
+                    placeholder = { Text("http://192.168.1.100:7474", color = BhqGrey) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = DronePrimary,
-                        unfocusedBorderColor = DroneDivider,
-                        focusedTextColor = DroneTextPrimary,
-                        unfocusedTextColor = DroneTextPrimary,
-                        cursorColor = DronePrimary
+                        focusedBorderColor   = BhqCyan,
+                        unfocusedBorderColor = BhqNavyLight,
+                        focusedTextColor     = BhqWhite,
+                        unfocusedTextColor   = BhqWhite,
+                        cursorColor          = BhqCyan
                     )
                 )
             }
 
-            Divider(color = DroneDivider)
+            Divider(color = BhqDivider)
 
             // Log paths
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Flight Log Paths", color = DronePrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Flight Log Paths", color = BhqCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    "One path per line. The app scans all paths and combines the results. Paths that don't exist on this controller are silently skipped.",
-                    color = DroneTextSecondary, fontSize = 13.sp
+                    "One path per line. Paths that don't exist on this controller are silently skipped.",
+                    color = BhqGrey, fontSize = 13.sp
                 )
                 OutlinedTextField(
                     value = logPaths,
@@ -111,26 +111,29 @@ fun SettingsScreen(
                         .heightIn(min = 140.dp),
                     minLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = DronePrimary,
-                        unfocusedBorderColor = DroneDivider,
-                        focusedTextColor = DroneTextPrimary,
-                        unfocusedTextColor = DroneTextPrimary,
-                        cursorColor = DronePrimary
+                        focusedBorderColor   = BhqCyan,
+                        unfocusedBorderColor = BhqNavyLight,
+                        focusedTextColor     = BhqWhite,
+                        unfocusedTextColor   = BhqWhite,
+                        cursorColor          = BhqCyan
                     )
                 )
             }
 
-            Divider(color = DroneDivider)
+            Divider(color = BhqDivider)
 
             // Info card
-            Card(colors = CardDefaults.cardColors(containerColor = DroneSurface)) {
+            Card(colors = CardDefaults.cardColors(containerColor = BhqNavyMid)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("How it works", color = DronePrimary, fontWeight = FontWeight.Bold)
-                    Text("1. Tap SCAN — finds .txt/.log files in all configured paths", color = DroneTextSecondary, fontSize = 13.sp)
-                    Text("2. Tap SYNC ALL — uploads files and verifies SHA-256 checksums", color = DroneTextSecondary, fontSize = 13.sp)
-                    Text("3. Tap DELETE — removes verified files from this controller only", color = DroneTextSecondary, fontSize = 13.sp)
+                    Text("How it works", color = BhqCyan, fontWeight = FontWeight.Bold)
+                    Text("1. Tap SCAN FOR LOGS — finds .txt/.log files in all configured paths", color = BhqGrey, fontSize = 13.sp)
+                    Text("2. Tap SYNC ALL — uploads files and verifies SHA-256 checksums", color = BhqGrey, fontSize = 13.sp)
+                    Text("3. Tap DELETE — removes verified files from this controller only", color = BhqGrey, fontSize = 13.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text("Files are never deleted automatically — you must confirm.", color = DroneError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Files are never deleted automatically — you must confirm.",
+                        color = BhqRed, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
