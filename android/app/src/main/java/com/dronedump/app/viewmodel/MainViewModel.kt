@@ -24,7 +24,7 @@ private val DEFAULT_PATHS = listOf(
 
 private const val PREF_SERVER_URL = "server_url"
 private const val PREF_LOG_PATHS = "log_paths"
-private const val DEFAULT_SERVER = "http://192.168.1.100:7474"
+private const val DEFAULT_SERVER = "http://192.168.50.20:7474"
 
 class MainViewModel : ViewModel() {
 
