@@ -8,7 +8,6 @@ services:
     ports:
       - "7474:7474"
     volumes:
-      # Change this path to match your Open DroneLog watch folder
-      - /volume1/flightlogs:/data/flightlogs
+      - "/volume1/docker/Log Sync/DroneLogData:/data/flightlogs"
     environment:
       - UPLOAD_DIR=/data/flightlogs
