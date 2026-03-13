@@ -108,11 +108,9 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .background(
                     Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color(0xFF0F2248),
-                            0.65f to Color(0xFF0B1A35),
-                            1.0f to BhqNavy,
-                        ),
+                        0.0f  to Color(0xFF0F2248),
+                        0.65f to Color(0xFF0B1A35),
+                        1.0f  to BhqNavy,
                         center = Offset.Unspecified,
                         radius = 900f
                     )
