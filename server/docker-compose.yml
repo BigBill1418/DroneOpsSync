@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  dronedump:
+    build: .
+    container_name: dronedump-server
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+    volumes:
+      # Change this path to match your Open DroneLog watch folder
+      - /volume1/flightlogs:/data/flightlogs
+    environment:
+      - UPLOAD_DIR=/data/flightlogs
