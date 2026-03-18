@@ -12,13 +12,16 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.droneopssync.app.BuildConfig
 import com.droneopssync.app.ui.theme.*
 import com.droneopssync.app.viewmodel.MainViewModel
 
@@ -212,6 +215,17 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // ── Version footer ────────────────────────────────────────────────────
+            Text(
+                "DroneOpsSync  v${BuildConfig.VERSION_NAME}  ·  Build ${BuildConfig.VERSION_CODE}",
+                color = DocMuted,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+            )
         }
     }
 }

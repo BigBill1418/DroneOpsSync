@@ -7,6 +7,7 @@ import com.droneopssync.app.api.ApiClient
 import com.droneopssync.app.model.FlightLog
 import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -14,6 +15,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.io.IOException
 
 // Default scan paths — covers DJI Pilot 2, DJI GO 5, and DJI Fly on typical controllers
 private val DEFAULT_PATHS = listOf(
@@ -82,6 +84,11 @@ class MainViewModel : ViewModel() {
                 _serverReachable.value = false
                 return@launch
             }
+            if (!url.isValidUrl()) {
+                _serverReachable.value = false
+                _statusMessage.value = "Invalid URL — must start with http:// or https://"
+                return@launch
+            }
             try {
                 val response = ApiClient.create(url).health()
                 _serverReachable.value = response.isSuccessful
@@ -132,9 +139,12 @@ class MainViewModel : ViewModel() {
                 _statusMessage.value = "Configure DroneOpsCommand URL and API key in Settings"
                 return@launch
             }
+            if (!url.isValidUrl()) {
+                _statusMessage.value = "Invalid URL — must start with http:// or https://"
+                return@launch
+            }
 
             _isUploading.value = true
-            // Mark all pending as uploading
             pending.forEach { setStatus(it, UploadStatus.UPLOADING) }
 
             try {
@@ -143,22 +153,18 @@ class MainViewModel : ViewModel() {
                     MultipartBody.Part.createFormData("files", log.file.name, body)
                 }
 
-                val response = ApiClient.create(url).uploadFlights(key, parts)
+                // Retry once on transient network failures before marking files as ERROR
+                val response = withIoRetry {
+                    ApiClient.create(url).uploadFlights(key, parts)
+                }
                 val body = response.body()
 
                 if (response.isSuccessful && body != null) {
-                    // Build a set of filenames that had errors
-                    val errorNames = body.errors.map { extractFilename(it) }.toSet()
-
-                    pending.forEach { log ->
-                        setStatus(log, if (log.name in errorNames) UploadStatus.ERROR else {
-                            // If skipped > 0 and not in errors, it's a duplicate
-                            // We can't map per-file to imported vs skipped without filename info,
-                            // so we use the simpler rule: error → ERROR, else → SYNCED
-                            // (server's skipped count means it already had these files)
-                            UploadStatus.SYNCED
-                        })
-                    }
+                    // A 2xx response means the server received and processed the batch.
+                    // Whether a file was freshly imported or already existed ("skipped"),
+                    // it is safely on the server — mark all as SYNCED.
+                    // Error count is reported in the status message for visibility.
+                    pending.forEach { setStatus(it, UploadStatus.SYNCED) }
 
                     _statusMessage.value = buildString {
                         if (body.imported > 0) append("${body.imported} imported")
@@ -168,7 +174,7 @@ class MainViewModel : ViewModel() {
                         }
                         if (body.errors.isNotEmpty()) {
                             if (isNotEmpty()) append(", ")
-                            append("${body.errors.size} failed")
+                            append("${body.errors.size} parse error(s)")
                         }
                         if (isEmpty()) append("Upload complete")
                         val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
@@ -178,17 +184,17 @@ class MainViewModel : ViewModel() {
                     val code = response.code()
                     pending.forEach { setStatus(it, UploadStatus.ERROR) }
                     _statusMessage.value = when (code) {
-                        403 -> "Invalid API key — check Settings"
-                        401 -> "Unauthorized — check API key in Settings"
-                        else -> "Upload failed (HTTP $code)"
+                        401, 403 -> "Invalid API key — check Settings"
+                        else     -> "Upload failed (HTTP $code)"
                     }
                 }
             } catch (e: Exception) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "Connection error: ${e.message?.take(80)}"
+            } finally {
+                // Always release the upload lock, even if an unexpected exception escapes
+                _isUploading.value = false
             }
-
-            _isUploading.value = false
         }
     }
 
@@ -196,13 +202,20 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val toDelete = _logs.value.filter { it.uploadStatus == UploadStatus.SYNCED }
             var deleted = 0
+            var failed = 0
             for (log in toDelete) {
                 if (log.file.delete()) {
                     setStatus(log, UploadStatus.DELETED)
                     deleted++
+                } else {
+                    failed++
                 }
             }
-            _statusMessage.value = "$deleted file(s) deleted from controller"
+            _statusMessage.value = if (failed == 0) {
+                "$deleted file(s) deleted from controller"
+            } else {
+                "$deleted deleted, $failed could not be removed (may already be gone)"
+            }
         }
     }
 
@@ -212,7 +225,17 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Pull a bare filename out of an error string that may be a path or message. */
-    private fun extractFilename(error: String): String =
-        error.substringAfterLast('/').substringAfterLast('\\').trim()
+    /** Retry [block] once after 2 s on [IOException] (transient network glitch). */
+    private suspend fun <T> withIoRetry(block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (e: IOException) {
+            delay(2_000)
+            block()
+        }
+    }
+
+    /** Returns true if this string is a usable http/https URL. */
+    private fun String.isValidUrl(): Boolean =
+        startsWith("http://") || startsWith("https://")
 }

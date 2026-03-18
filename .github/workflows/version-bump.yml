@@ -1,0 +1,47 @@
+name: Bump patch version
+
+# Automatically increments the patch segment of VERSION_NAME in version.properties
+# whenever Android source files change on main.  Minor/major bumps remain manual.
+# The resulting commit is tagged [skip ci] so it does not re-trigger itself.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read current version
+        id: read
+        run: |
+          VERSION=$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)
+          echo "current=$VERSION" >> $GITHUB_OUTPUT
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          NEW_PATCH=$(( PATCH + 1 ))
+          NEW="$MAJOR.$MINOR.$NEW_PATCH"
+          echo "new=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Write new version
+        run: |
+          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${{ steps.read.outputs.new }}/" android/version.properties
+
+      - name: Commit and push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: bump version to ${{ steps.read.outputs.new }} [skip ci]"
+          file_pattern: android/version.properties
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"

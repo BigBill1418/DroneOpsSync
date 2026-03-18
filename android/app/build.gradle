@@ -3,6 +3,21 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Read human-readable version name from version.properties (single source of truth)
+def versionProps = new Properties()
+file("../version.properties").withInputStream { versionProps.load(it) }
+
+// Auto-compute versionCode from total git commit count so every build is uniquely numbered
+def getGitCommitCount = { ->
+    try {
+        def result = 'git rev-list --count HEAD'.execute([], rootDir)
+        result.waitFor()
+        result.exitValue() == 0 ? result.text.trim().toInteger() : 1
+    } catch (ignored) {
+        1
+    }
+}
+
 android {
     namespace 'com.droneopssync.app'
     compileSdk 34
@@ -11,8 +26,8 @@ android {
         applicationId "com.droneopssync.app"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode getGitCommitCount()
+        versionName versionProps['VERSION_NAME']
     }
 
     buildTypes {
@@ -33,6 +48,7 @@ android {
 
     buildFeatures {
         compose true
+        buildConfig true
     }
 
     composeOptions {
