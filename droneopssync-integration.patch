@@ -1,0 +1,409 @@
+From dd213b90d466b50ba97840eccf2944b8ffbe745c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 18 Mar 2026 16:38:31 +0000
+Subject: [PATCH] feat: device API key auth + /device-upload endpoint for
+ DroneOpsSync
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds the full backend plumbing required for the DroneOpsSync Android app
+(field controllers) to push flight logs without a user JWT login session.
+
+NEW FILES
+- backend/app/models/device_api_key.py
+    DeviceApiKey model — stores label, SHA-256 key hash (raw key never
+    persisted), is_active flag, and last_used_at timestamp.
+    Table created automatically by create_all on next container start.
+
+- backend/app/auth/device.py
+    validate_device_api_key() FastAPI dependency — reads X-Device-Api-Key
+    header, hashes it, looks up the hash in device_api_keys, returns 401
+    for unknown or revoked keys.  Updates last_used_at on success.
+
+- backend/app/routers/device_keys.py
+    Settings router at /api/settings/device-keys (JWT-protected):
+      GET    /api/settings/device-keys       — list all keys (no raw values)
+      POST   /api/settings/device-keys       — generate key, return raw ONCE
+      DELETE /api/settings/device-keys/{id}  — permanently revoke a key
+
+MODIFIED FILES
+- backend/app/routers/flight_library.py
+    POST /api/flight-library/device-upload — identical upload processing
+    to /upload but authenticated via validate_device_api_key instead of
+    get_current_user.  This is the endpoint DroneOpsSync calls.
+
+- backend/app/models/__init__.py
+    Register DeviceApiKey so Base.metadata.create_all sees the table.
+
+- backend/app/main.py
+    Import and include device_keys router.
+
+WORKFLOW
+1. Admin creates a device key in Settings -> Device Access (or via API)
+2. Raw key is copied once into DroneOpsSync controller Settings
+3. DroneOpsSync POSTs to /api/flight-library/device-upload with the key
+   in the X-Device-Api-Key header — works via Cloudflare tunnel or LAN
+
+https://claude.ai/code/session_01FnU51YkyLXvNmiCeYh2h5X
+---
+ backend/app/auth/device.py            |  45 +++++++++++
+ backend/app/main.py                   |   3 +-
+ backend/app/models/__init__.py        |   2 +
+ backend/app/models/device_api_key.py  |  22 ++++++
+ backend/app/routers/device_keys.py    | 107 ++++++++++++++++++++++++++
+ backend/app/routers/flight_library.py |  93 ++++++++++++++++++++++
+ 6 files changed, 271 insertions(+), 1 deletion(-)
+ create mode 100644 backend/app/auth/device.py
+ create mode 100644 backend/app/models/device_api_key.py
+ create mode 100644 backend/app/routers/device_keys.py
+
+diff --git a/backend/app/auth/device.py b/backend/app/auth/device.py
+new file mode 100644
+index 0000000..a6de38d
+--- /dev/null
++++ b/backend/app/auth/device.py
+@@ -0,0 +1,45 @@
++"""Device API key authentication dependency for field controllers."""
++
++import hashlib
++from datetime import datetime
++
++from fastapi import Depends, Header, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.database import get_db
++from app.models.device_api_key import DeviceApiKey
++
++
++async def validate_device_api_key(
++    x_device_api_key: str = Header(..., description="Device API key from DroneOpsCommand Settings → Device Access"),
++    db: AsyncSession = Depends(get_db),
++) -> DeviceApiKey:
++    """Dependency that validates X-Device-Api-Key header against stored key hashes.
++
++    The raw key is never stored — only its SHA-256 digest.  A 401 is returned for
++    any key that is missing, unknown, or has been revoked.
++    """
++    key_hash = hashlib.sha256(x_device_api_key.encode()).hexdigest()
++
++    result = await db.execute(
++        select(DeviceApiKey).where(
++            DeviceApiKey.key_hash == key_hash,
++            DeviceApiKey.is_active.is_(True),
++        )
++    )
++    device_key = result.scalar_one_or_none()
++
++    if not device_key:
++        raise HTTPException(
++            status_code=status.HTTP_401_UNAUTHORIZED,
++            detail="Invalid or revoked device API key",
++        )
++
++    # Record last-used timestamp (best effort — do not fail the request if this write fails)
++    try:
++        device_key.last_used_at = datetime.utcnow()
++    except Exception:
++        pass
++
++    return device_key
+diff --git a/backend/app/main.py b/backend/app/main.py
+index c22bdc1..6508d3c 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -15,7 +15,7 @@ from slowapi.util import get_remote_address
+ from app.config import settings
+ from app.database import Base, async_session, engine, get_db
+ import app.models  # noqa: F401 — ensure all models registered with Base before create_all
+-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance
++from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, device_keys
+ 
+ # Configure root logger for the app
+ logging.basicConfig(
+@@ -198,6 +198,7 @@ app.include_router(intake.router)
+ app.include_router(flight_library.router)
+ app.include_router(batteries.router)
+ app.include_router(maintenance.router)
++app.include_router(device_keys.router)
+ 
+ 
+ @app.middleware("http")
+diff --git a/backend/app/models/__init__.py b/backend/app/models/__init__.py
+index b0f23a3..0e25222 100644
+--- a/backend/app/models/__init__.py
++++ b/backend/app/models/__init__.py
+@@ -8,6 +8,7 @@ from app.models.system_settings import SystemSetting
+ from app.models.flight import Flight, FlightSource
+ from app.models.battery import Battery, BatteryLog
+ from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
++from app.models.device_api_key import DeviceApiKey
+ 
+ __all__ = [
+     "Customer",
+@@ -30,4 +31,5 @@ __all__ = [
+     "BatteryLog",
+     "MaintenanceRecord",
+     "MaintenanceSchedule",
++    "DeviceApiKey",
+ ]
+diff --git a/backend/app/models/device_api_key.py b/backend/app/models/device_api_key.py
+new file mode 100644
+index 0000000..7cd2508
+--- /dev/null
++++ b/backend/app/models/device_api_key.py
+@@ -0,0 +1,22 @@
++"""Device API key model — allows field controllers to authenticate without a user login."""
++
++import uuid
++from datetime import datetime
++
++from sqlalchemy import String, DateTime, Boolean
++from sqlalchemy.dialects.postgresql import UUID
++from sqlalchemy.orm import Mapped, mapped_column
++
++from app.database import Base
++
++
++class DeviceApiKey(Base):
++    __tablename__ = "device_api_keys"
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    label: Mapped[str] = mapped_column(String(255), nullable=False)
++    # SHA-256 hex digest of the raw key — the raw key is never stored
++    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
++    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
++    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
++    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+diff --git a/backend/app/routers/device_keys.py b/backend/app/routers/device_keys.py
+new file mode 100644
+index 0000000..cacf19f
+--- /dev/null
++++ b/backend/app/routers/device_keys.py
+@@ -0,0 +1,107 @@
++"""Device API key management — Settings → Device Access.
++
++Allows admins to create, list, and revoke static API keys used by field
++controllers (DroneOpsSync) to upload flight logs without a user login.
++"""
++
++import hashlib
++import secrets
++import uuid
++from datetime import datetime
++
++from fastapi import APIRouter, Depends, HTTPException
++from pydantic import BaseModel
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.auth.jwt import get_current_user
++from app.database import get_db
++from app.models.device_api_key import DeviceApiKey
++from app.models.user import User
++
++router = APIRouter(prefix="/api/settings/device-keys", tags=["settings"])
++
++
++class DeviceKeyResponse(BaseModel):
++    id: uuid.UUID
++    label: str
++    is_active: bool
++    created_at: datetime
++    last_used_at: datetime | None
++
++    model_config = {"from_attributes": True}
++
++
++class DeviceKeyCreateResponse(DeviceKeyResponse):
++    """Returned ONCE at creation — includes the raw key which is never stored."""
++    raw_key: str
++
++
++class DeviceKeyCreate(BaseModel):
++    label: str
++
++
++@router.get("", response_model=list[DeviceKeyResponse])
++async def list_device_keys(
++    _user: User = Depends(get_current_user),
++    db: AsyncSession = Depends(get_db),
++):
++    """List all device API keys (raw keys are never returned after creation)."""
++    result = await db.execute(
++        select(DeviceApiKey).order_by(DeviceApiKey.created_at.desc())
++    )
++    return result.scalars().all()
++
++
++@router.post("", response_model=DeviceKeyCreateResponse, status_code=201)
++async def create_device_key(
++    payload: DeviceKeyCreate,
++    _user: User = Depends(get_current_user),
++    db: AsyncSession = Depends(get_db),
++):
++    """Create a new device API key.
++
++    The raw key is returned exactly ONCE in this response and is never stored.
++    Copy it to your DroneOpsSync controller immediately.
++    """
++    raw_key = secrets.token_urlsafe(32)
++    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
++
++    device_key = DeviceApiKey(
++        label=payload.label.strip() or "Unnamed Device",
++        key_hash=key_hash,
++    )
++    db.add(device_key)
++    await db.flush()
++    await db.refresh(device_key)
++    await db.commit()
++
++    return DeviceKeyCreateResponse(
++        id=device_key.id,
++        label=device_key.label,
++        is_active=device_key.is_active,
++        created_at=device_key.created_at,
++        last_used_at=device_key.last_used_at,
++        raw_key=raw_key,
++    )
++
++
++@router.delete("/{key_id}", status_code=204)
++async def revoke_device_key(
++    key_id: uuid.UUID,
++    _user: User = Depends(get_current_user),
++    db: AsyncSession = Depends(get_db),
++):
++    """Revoke (permanently delete) a device API key.
++
++    Any controller using this key will immediately lose upload access.
++    """
++    result = await db.execute(
++        select(DeviceApiKey).where(DeviceApiKey.id == key_id)
++    )
++    device_key = result.scalar_one_or_none()
++    if not device_key:
++        raise HTTPException(status_code=404, detail="Device key not found")
++
++    await db.delete(device_key)
++    await db.commit()
+diff --git a/backend/app/routers/flight_library.py b/backend/app/routers/flight_library.py
+index c095281..fe5f1b1 100644
+--- a/backend/app/routers/flight_library.py
++++ b/backend/app/routers/flight_library.py
+@@ -10,10 +10,12 @@ from fastapi.responses import StreamingResponse
+ from sqlalchemy import select, func, desc
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
++from app.auth.device import validate_device_api_key
+ from app.auth.jwt import get_current_user
+ from app.config import settings
+ from app.database import get_db
+ from app.models.battery import Battery, BatteryLog
++from app.models.device_api_key import DeviceApiKey
+ from app.models.flight import Flight
+ from app.models.user import User
+ from app.schemas.flight import (
+@@ -211,6 +213,97 @@ async def upload_flights(
+     )
+ 
+ 
++# ── Device upload (field controllers via X-Device-Api-Key) ───────────
++@router.post("/device-upload", response_model=FlightUploadResponse)
++async def device_upload_flights(
++    files: list[UploadFile] = File(...),
++    db: AsyncSession = Depends(get_db),
++    _device: DeviceApiKey = Depends(validate_device_api_key),
++):
++    """Upload flight logs from a field controller using a static device API key.
++
++    Identical processing to /upload but authenticates via X-Device-Api-Key header
++    instead of a user JWT, allowing automated sync from DroneOpsSync without
++    requiring a human login session on the controller.
++    """
++    imported = []
++    skipped = 0
++    errors = []
++
++    for upload in files:
++        try:
++            content = await upload.read()
++            file_hash = hashlib.sha256(content).hexdigest()
++
++            existing = await db.execute(
++                select(Flight).where(Flight.source_file_hash == file_hash)
++            )
++            if existing.scalar_one_or_none():
++                skipped += 1
++                continue
++
++            async with httpx.AsyncClient(timeout=120) as client:
++                resp = await client.post(
++                    f"{PARSER_URL}/parse",
++                    files={"file": (upload.filename or "upload.txt", content)},
++                )
++                if resp.status_code != 200:
++                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
++                    continue
++
++                data = resp.json()
++                if data.get("errors"):
++                    errors.extend(data["errors"])
++
++                for parsed in data.get("flights", []):
++                    ph = parsed.get("file_hash", file_hash)
++                    dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
++                    if dup.scalar_one_or_none():
++                        skipped += 1
++                        continue
++
++                    flight = Flight(
++                        name=parsed.get("name", upload.filename or "Unknown"),
++                        drone_model=parsed.get("drone_model"),
++                        drone_serial=parsed.get("drone_serial"),
++                        battery_serial=parsed.get("battery_serial"),
++                        start_time=parsed.get("start_time"),
++                        duration_secs=parsed.get("duration_secs", 0),
++                        total_distance=parsed.get("total_distance", 0),
++                        max_altitude=parsed.get("max_altitude", 0),
++                        max_speed=parsed.get("max_speed", 0),
++                        home_lat=parsed.get("home_lat"),
++                        home_lon=parsed.get("home_lon"),
++                        point_count=parsed.get("point_count", 0),
++                        gps_track=parsed.get("gps_track"),
++                        telemetry=parsed.get("telemetry"),
++                        raw_metadata=parsed.get("raw_metadata"),
++                        source=parsed.get("source", "dji_txt"),
++                        source_file_hash=ph,
++                        original_filename=parsed.get("original_filename", upload.filename),
++                    )
++                    db.add(flight)
++                    await db.flush()
++                    await db.refresh(flight)
++                    imported.append(flight)
++
++                    battery_data = parsed.get("battery_data")
++                    if battery_data and battery_data.get("serial"):
++                        await _track_battery(db, flight, battery_data)
++
++        except httpx.ConnectError:
++            errors.append(f"{upload.filename}: flight-parser service unavailable")
++        except Exception as e:
++            errors.append(f"{upload.filename}: {str(e)}")
++
++    return FlightUploadResponse(
++        imported=len(imported),
++        skipped=skipped,
++        errors=errors,
++        flights=imported,
++    )
++
++
+ # ── Manual flight entry ───────────────────────────────────────────────
+ @router.post("/manual", response_model=FlightResponse, status_code=201)
+ async def create_manual_flight(
+-- 
+2.43.0
+
