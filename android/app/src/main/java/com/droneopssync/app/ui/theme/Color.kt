@@ -2,18 +2,21 @@ package com.droneopssync.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ── BarnardHQ Brand Palette ─────────────────────────────────────────────────
-val BhqNavy         = Color(0xFF091525)   // Deep navy — primary background
-val BhqNavyMid      = Color(0xFF0D1F3C)   // Cards / elevated surfaces
-val BhqNavyLight    = Color(0xFF162847)   // Input fields / borders
-val BhqCyan         = Color(0xFF29B4E8)   // BarnardHQ cyan — primary accent
-val BhqCyanDim      = Color(0xFF1A8AB5)   // Pressed / secondary cyan
-val BhqWhite        = Color(0xFFFFFFFF)   // Primary text
-val BhqGrey         = Color(0xFF7A90AB)   // Muted / secondary text
-val BhqDivider      = Color(0xFF152035)   // Subtle separator
+// ── DroneOpsCommand Brand Palette ────────────────────────────────────────────
+val DocDeep         = Color(0xFF050608)   // Deepest background
+val DocPanel        = Color(0xFF0E1117)   // Cards / surfaces
+val DocSurface      = Color(0xFF151B24)   // Elevated cards / input fields
 
-// ── Status colours ───────────────────────────────────────────────────────────
-val BhqGreen        = Color(0xFF00E676)   // Ready to sync
-val BhqRed          = Color(0xFFFF4444)   // Not ready / error
-val BhqAmber        = Color(0xFFFFAB00)   // Uploading / in-progress
-val BhqDeleted      = Color(0xFF4A6080)   // Deleted / done
+val DocCyan         = Color(0xFF00D4FF)   // Primary accent — DroneOps cyan
+val DocCyanDim      = Color(0xFF009AB8)   // Pressed / secondary cyan
+val DocOrange       = Color(0xFFFF6B1A)   // Secondary accent / warning
+
+val DocWhite        = Color(0xFFE8EDF2)   // Primary text
+val DocMuted        = Color(0xFF5A6478)   // Secondary / muted text
+val DocDivider      = Color(0xFF0E1520)   // Subtle separator
+
+// ── Status colours ────────────────────────────────────────────────────────────
+val DocGreen        = Color(0xFF00E676)   // Synced / success
+val DocRed          = Color(0xFFFF4444)   // Error / unreachable
+val DocAmber        = Color(0xFFFFAB00)   // Uploading / in-progress
+val DocDeleted      = Color(0xFF3A4A60)   // Deleted / done

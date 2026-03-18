@@ -27,7 +27,8 @@ data class FlightLog(
 enum class UploadStatus {
     PENDING,
     UPLOADING,
-    VERIFIED,
+    SYNCED,       // Server confirmed new import
+    DUPLICATE,    // Already on server (deduped by server-side hash)
     DELETED,
     ERROR
 }

@@ -28,9 +28,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droneopssync.app.model.FlightLog
@@ -50,43 +53,43 @@ fun HomeScreen(
     val serverReachable by viewModel.serverReachable.collectAsState()
 
     val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
-    val hasVerified = logs.any { it.uploadStatus == UploadStatus.VERIFIED }
+    val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    // ── Delete confirmation dialog ───────────────────────────────────────────
+    // ── Delete confirmation dialog ────────────────────────────────────────────
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            containerColor = BhqNavyMid,
-            title = { Text("Confirm Delete", color = BhqWhite, fontWeight = FontWeight.Bold) },
+            containerColor = DocPanel,
+            title = { Text("Confirm Delete", color = DocWhite, fontWeight = FontWeight.Bold) },
             text = {
-                val count = logs.count { it.uploadStatus == UploadStatus.VERIFIED }
+                val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
                 Text(
-                    "Delete $count verified file(s) from this controller?\n\n" +
-                    "Files are confirmed on the NAS — this cannot be undone.",
-                    color = BhqGrey
+                    "Delete $count synced file(s) from this controller?\n\n" +
+                    "Files are confirmed in DroneOpsCommand — this cannot be undone.",
+                    color = DocMuted
                 )
             },
             confirmButton = {
                 Button(
-                    onClick = { showDeleteDialog = false; viewModel.deleteVerified() },
-                    colors = ButtonDefaults.buttonColors(containerColor = BhqRed)
+                    onClick = { showDeleteDialog = false; viewModel.deleteSynced() },
+                    colors = ButtonDefaults.buttonColors(containerColor = DocRed)
                 ) { Text("Delete", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
                 OutlinedButton(
                     onClick = { showDeleteDialog = false },
-                    border = BorderStroke(1.dp, BhqGrey)
-                ) { Text("Cancel", color = BhqGrey) }
+                    border = BorderStroke(1.dp, DocMuted)
+                ) { Text("Cancel", color = DocMuted) }
             }
         )
     }
 
-    // ── Root ─────────────────────────────────────────────────────────────────
+    // ── Root ──────────────────────────────────────────────────────────────────
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BhqNavy)
+            .background(DocDeep)
     ) {
 
         // ── Minimal top bar ──────────────────────────────────────────────────
@@ -98,7 +101,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onNavigateToSettings) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = BhqGrey)
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = DocMuted)
             }
         }
 
@@ -108,9 +111,9 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .background(
                     Brush.radialGradient(
-                        0.0f  to Color(0xFF0F2248),
-                        0.65f to Color(0xFF0B1A35),
-                        1.0f  to BhqNavy,
+                        0.0f  to Color(0xFF091220),
+                        0.55f to Color(0xFF060C18),
+                        1.0f  to DocDeep,
                         center = Offset.Unspecified,
                         radius = 900f
                     )
@@ -119,7 +122,7 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            // Logo (PNG or text fallback)
+            // Logo (PNG if droneops_sync_logo drawable present, text fallback otherwise)
             BrandLogo()
 
             Spacer(Modifier.height(26.dp))
@@ -138,20 +141,20 @@ fun HomeScreen(
                 enabled = hasPending && serverReachable == true && !isUploading,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = BhqCyan,
-                    disabledContainerColor = BhqNavyLight
+                    containerColor = DocCyan,
+                    disabledContainerColor = DocSurface
                 )
             ) {
                 if (isUploading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        color = BhqNavy,
+                        color = DocDeep,
                         strokeWidth = 2.5.dp
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "UPLOADING…",
-                        color = BhqNavy,
+                        "SYNCING…",
+                        color = DocDeep,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.5.sp,
                         fontSize = 15.sp
@@ -161,12 +164,12 @@ fun HomeScreen(
                         Icons.Default.CloudUpload,
                         contentDescription = null,
                         modifier = Modifier.size(20.dp),
-                        tint = BhqNavy
+                        tint = DocDeep
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
                         "SYNC ALL",
-                        color = BhqNavy,
+                        color = DocDeep,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.5.sp,
                         fontSize = 15.sp
@@ -184,26 +187,26 @@ fun HomeScreen(
                     .height(46.dp),
                 enabled = !isUploading,
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.5.dp, BhqCyan.copy(alpha = 0.6f))
+                border = BorderStroke(1.5.dp, DocCyan.copy(alpha = 0.6f))
             ) {
                 Icon(
                     Icons.Default.Search,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = BhqCyan
+                    tint = DocCyan
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "SCAN FOR LOGS",
-                    color = BhqCyan,
+                    color = DocCyan,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 1.sp,
                     fontSize = 14.sp
                 )
             }
 
-            // ── Delete verified (conditional) ────────────────────────────────
-            if (hasVerified) {
+            // ── Delete synced (conditional) ──────────────────────────────────
+            if (hasSynced) {
                 Spacer(Modifier.height(10.dp))
                 Button(
                     onClick = { showDeleteDialog = true },
@@ -211,13 +214,15 @@ fun HomeScreen(
                         .fillMaxWidth(0.82f)
                         .height(46.dp),
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BhqRed.copy(alpha = 0.85f))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DocRed.copy(alpha = 0.85f)
+                    )
                 ) {
                     Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    val count = logs.count { it.uploadStatus == UploadStatus.VERIFIED }
+                    val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
                     Text(
-                        "DELETE $count VERIFIED FILE(S)",
+                        "DELETE $count SYNCED FILE(S)",
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.8.sp,
                         fontSize = 13.sp
@@ -226,11 +231,11 @@ fun HomeScreen(
             }
         }
 
-        // ── Status bar ───────────────────────────────────────────────────────
-        Surface(color = BhqNavyMid) {
+        // ── Status bar ────────────────────────────────────────────────────────
+        Surface(color = DocPanel) {
             Text(
                 text = statusMessage,
-                color = BhqGrey,
+                color = DocMuted,
                 fontSize = 12.sp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -239,7 +244,7 @@ fun HomeScreen(
             )
         }
 
-        Divider(color = BhqDivider, thickness = 1.dp)
+        HorizontalDivider(color = DocDivider, thickness = 1.dp)
 
         // ── Log list / empty state ────────────────────────────────────────────
         if (logs.isEmpty()) {
@@ -260,7 +265,7 @@ fun HomeScreen(
     }
 }
 
-// ── Ready To Sync badge ──────────────────────────────────────────────────────
+// ── Ready To Sync badge ───────────────────────────────────────────────────────
 @Composable
 private fun ReadyToSyncBadge(serverReachable: Boolean?) {
     val isChecking = serverReachable == null
@@ -275,9 +280,9 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 
     val dotColor by animateColorAsState(
         targetValue = when (serverReachable) {
-            true  -> BhqGreen
-            false -> BhqRed
-            null  -> BhqAmber
+            true  -> DocGreen
+            false -> DocRed
+            null  -> DocAmber
         },
         animationSpec = tween(400),
         label = "dotColor"
@@ -285,9 +290,9 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 
     val labelColor by animateColorAsState(
         targetValue = when (serverReachable) {
-            true  -> BhqGreen
-            false -> BhqRed
-            null  -> BhqAmber
+            true  -> DocGreen
+            false -> DocRed
+            null  -> DocAmber
         },
         animationSpec = tween(400),
         label = "labelColor"
@@ -326,36 +331,40 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 private fun BrandLogo() {
     val context = LocalContext.current
     val resId = remember {
-        context.resources.getIdentifier("barnard_hq_logo", "drawable", context.packageName)
+        context.resources.getIdentifier("droneops_sync_logo", "drawable", context.packageName)
     }
 
     if (resId != 0) {
         Image(
             painter = painterResource(resId),
-            contentDescription = "BarnardHQ — Professional Aerial Operations",
+            contentDescription = "DroneOpsSync — Flight Log Sync",
             modifier = Modifier
                 .fillMaxWidth(0.72f)
                 .aspectRatio(2.5f),
             contentScale = ContentScale.Fit
         )
     } else {
-        // Text fallback until barnard_hq_logo.png is added to res/drawable/
+        // Text fallback until droneops_sync_logo.png is added to res/drawable/
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Default.Flight,
                 contentDescription = null,
-                tint = BhqCyan,
+                tint = DocCyan,
                 modifier = Modifier.size(56.dp)
             )
             Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text("Barnard", color = BhqWhite, fontWeight = FontWeight.Bold, fontSize = 36.sp)
-                Text("HQ",      color = BhqCyan,  fontWeight = FontWeight.Bold, fontSize = 36.sp)
-            }
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = DocWhite)) { append("DroneOps") }
+                    withStyle(SpanStyle(color = DocCyan))  { append("Sync") }
+                },
+                fontWeight = FontWeight.Bold,
+                fontSize = 36.sp
+            )
             Spacer(Modifier.height(4.dp))
             Text(
-                "PROFESSIONAL AERIAL OPERATIONS",
-                color = BhqWhite.copy(alpha = 0.65f),
+                "FLIGHT LOG SYNC",
+                color = DocMuted,
                 fontSize = 11.sp,
                 letterSpacing = 2.sp
             )
@@ -363,7 +372,7 @@ private fun BrandLogo() {
     }
 }
 
-// ── Empty state ──────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 @Composable
 private fun EmptyState(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -371,33 +380,34 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             Icon(
                 Icons.Default.FolderOpen,
                 contentDescription = null,
-                tint = BhqGrey.copy(alpha = 0.35f),
+                tint = DocMuted.copy(alpha = 0.35f),
                 modifier = Modifier.size(52.dp)
             )
             Spacer(Modifier.height(12.dp))
-            Text("No logs found", color = BhqGrey, fontSize = 16.sp)
+            Text("No logs found", color = DocMuted, fontSize = 16.sp)
             Spacer(Modifier.height(4.dp))
-            Text("Tap  SCAN FOR LOGS  above", color = BhqGrey.copy(alpha = 0.55f), fontSize = 13.sp)
+            Text("Tap  SCAN FOR LOGS  above", color = DocMuted.copy(alpha = 0.55f), fontSize = 13.sp)
         }
     }
 }
 
-// ── Log file card ────────────────────────────────────────────────────────────
+// ── Log file card ─────────────────────────────────────────────────────────────
 @Composable
 private fun LogFileCard(log: FlightLog) {
     val (statusColor, statusLabel, statusIcon) = when (log.uploadStatus) {
-        UploadStatus.PENDING   -> Triple(BhqGrey,    "PENDING",   Icons.Default.Schedule)
-        UploadStatus.UPLOADING -> Triple(BhqAmber,   "UPLOADING", Icons.Default.CloudUpload)
-        UploadStatus.VERIFIED  -> Triple(BhqGreen,   "VERIFIED",  Icons.Default.CheckCircle)
-        UploadStatus.DELETED   -> Triple(BhqDeleted, "DELETED",   Icons.Default.Delete)
-        UploadStatus.ERROR     -> Triple(BhqRed,     "ERROR",     Icons.Default.Error)
+        UploadStatus.PENDING   -> Triple(DocMuted,    "PENDING",   Icons.Default.Schedule)
+        UploadStatus.UPLOADING -> Triple(DocAmber,    "SYNCING",   Icons.Default.CloudUpload)
+        UploadStatus.SYNCED    -> Triple(DocGreen,    "SYNCED",    Icons.Default.CheckCircle)
+        UploadStatus.DUPLICATE -> Triple(DocMuted,    "ON SERVER", Icons.Default.CloudDone)
+        UploadStatus.DELETED   -> Triple(DocDeleted,  "DELETED",   Icons.Default.Delete)
+        UploadStatus.ERROR     -> Triple(DocRed,      "ERROR",     Icons.Default.Error)
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = BhqNavyMid),
-        border = BorderStroke(1.dp, BhqNavyLight)
+        colors = CardDefaults.cardColors(containerColor = DocPanel),
+        border = BorderStroke(1.dp, DocSurface)
     ) {
         Row(
             modifier = Modifier
@@ -415,7 +425,7 @@ private fun LogFileCard(log: FlightLog) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = log.name,
-                    color = BhqWhite,
+                    color = DocWhite,
                     fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
@@ -424,7 +434,7 @@ private fun LogFileCard(log: FlightLog) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = "${log.dateFormatted}  ·  ${log.sizeFormatted}",
-                    color = BhqGrey,
+                    color = DocMuted,
                     fontSize = 11.sp
                 )
             }

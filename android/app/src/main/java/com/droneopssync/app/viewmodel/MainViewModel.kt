@@ -14,17 +14,18 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
-import java.security.MessageDigest
 
-// Default scan paths — covers both DJI Pilot 2 and DJI GO 5 controllers
+// Default scan paths — covers DJI Pilot 2, DJI GO 5, and DJI Fly on typical controllers
 private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord",
-    "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord"
+    "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord",
+    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
 )
 
-private const val PREF_SERVER_URL = "server_url"
-private const val PREF_LOG_PATHS = "log_paths"
-private const val DEFAULT_SERVER = "http://192.168.50.20:7474"
+private const val PREF_SERVER_URL  = "server_url"
+private const val PREF_API_KEY     = "api_key"
+private const val PREF_LOG_PATHS   = "log_paths"
+private const val DEFAULT_SERVER   = ""
 
 class MainViewModel : ViewModel() {
 
@@ -34,11 +35,13 @@ class MainViewModel : ViewModel() {
     private val _serverUrl = MutableStateFlow(DEFAULT_SERVER)
     val serverUrl: StateFlow<String> = _serverUrl
 
-    // Newline-separated list of paths shown/edited in Settings
+    private val _apiKey = MutableStateFlow("")
+    val apiKey: StateFlow<String> = _apiKey
+
     private val _logPathsText = MutableStateFlow(DEFAULT_PATHS.joinToString("\n"))
     val logPathsText: StateFlow<String> = _logPathsText
 
-    private val _statusMessage = MutableStateFlow("Tap scan to find flight logs")
+    private val _statusMessage = MutableStateFlow("Tap SCAN to find flight logs")
     val statusMessage: StateFlow<String> = _statusMessage
 
     private val _isUploading = MutableStateFlow(false)
@@ -48,16 +51,24 @@ class MainViewModel : ViewModel() {
     val serverReachable: StateFlow<Boolean?> = _serverReachable
 
     fun loadSettings(prefs: SharedPreferences) {
-        _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
+        _serverUrl.value    = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
+        _apiKey.value       = prefs.getString(PREF_API_KEY, "") ?: ""
         _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
             ?: DEFAULT_PATHS.joinToString("\n")
     }
 
-    fun saveSettings(prefs: SharedPreferences, serverUrl: String, logPathsText: String) {
-        _serverUrl.value = serverUrl.trim()
+    fun saveSettings(
+        prefs: SharedPreferences,
+        serverUrl: String,
+        apiKey: String,
+        logPathsText: String
+    ) {
+        _serverUrl.value    = serverUrl.trim()
+        _apiKey.value       = apiKey.trim()
         _logPathsText.value = logPathsText
         prefs.edit()
             .putString(PREF_SERVER_URL, serverUrl.trim())
+            .putString(PREF_API_KEY, apiKey.trim())
             .putString(PREF_LOG_PATHS, logPathsText)
             .apply()
         _statusMessage.value = "Settings saved"
@@ -66,8 +77,13 @@ class MainViewModel : ViewModel() {
     fun checkServerHealth() {
         viewModelScope.launch(Dispatchers.IO) {
             _serverReachable.value = null
+            val url = _serverUrl.value
+            if (url.isBlank()) {
+                _serverReachable.value = false
+                return@launch
+            }
             try {
-                val response = ApiClient.create(_serverUrl.value).health()
+                val response = ApiClient.create(url).health()
                 _serverReachable.value = response.isSuccessful
             } catch (e: Exception) {
                 _serverReachable.value = false
@@ -110,47 +126,75 @@ class MainViewModel : ViewModel() {
                 return@launch
             }
 
+            val url = _serverUrl.value
+            val key = _apiKey.value
+            if (url.isBlank() || key.isBlank()) {
+                _statusMessage.value = "Configure DroneOpsCommand URL and API key in Settings"
+                return@launch
+            }
+
             _isUploading.value = true
-            val service = ApiClient.create(_serverUrl.value)
-            var successCount = 0
-            var failCount = 0
+            // Mark all pending as uploading
+            pending.forEach { setStatus(it, UploadStatus.UPLOADING) }
 
-            for (log in pending) {
-                setStatus(log, UploadStatus.UPLOADING)
-                try {
-                    val localChecksum = sha256(log.file)
-                    val requestBody = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
-                    val part = MultipartBody.Part.createFormData("file", log.file.name, requestBody)
-
-                    val response = service.uploadFile(part)
-                    val body = response.body()
-
-                    if (response.isSuccessful && body != null && body.checksum == localChecksum) {
-                        setStatus(log, UploadStatus.VERIFIED)
-                        successCount++
-                    } else {
-                        setStatus(log, UploadStatus.ERROR)
-                        failCount++
-                    }
-                } catch (e: Exception) {
-                    setStatus(log, UploadStatus.ERROR)
-                    failCount++
+            try {
+                val parts = pending.map { log ->
+                    val body = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
+                    MultipartBody.Part.createFormData("files", log.file.name, body)
                 }
+
+                val response = ApiClient.create(url).uploadFlights(key, parts)
+                val body = response.body()
+
+                if (response.isSuccessful && body != null) {
+                    // Build a set of filenames that had errors
+                    val errorNames = body.errors.map { extractFilename(it) }.toSet()
+
+                    pending.forEach { log ->
+                        setStatus(log, if (log.name in errorNames) UploadStatus.ERROR else {
+                            // If skipped > 0 and not in errors, it's a duplicate
+                            // We can't map per-file to imported vs skipped without filename info,
+                            // so we use the simpler rule: error → ERROR, else → SYNCED
+                            // (server's skipped count means it already had these files)
+                            UploadStatus.SYNCED
+                        })
+                    }
+
+                    _statusMessage.value = buildString {
+                        if (body.imported > 0) append("${body.imported} imported")
+                        if (body.skipped > 0) {
+                            if (isNotEmpty()) append(", ")
+                            append("${body.skipped} already on server")
+                        }
+                        if (body.errors.isNotEmpty()) {
+                            if (isNotEmpty()) append(", ")
+                            append("${body.errors.size} failed")
+                        }
+                        if (isEmpty()) append("Upload complete")
+                        val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
+                        if (syncedCount > 0) append(" — tap Delete to clean up controller")
+                    }
+                } else {
+                    val code = response.code()
+                    pending.forEach { setStatus(it, UploadStatus.ERROR) }
+                    _statusMessage.value = when (code) {
+                        403 -> "Invalid API key — check Settings"
+                        401 -> "Unauthorized — check API key in Settings"
+                        else -> "Upload failed (HTTP $code)"
+                    }
+                }
+            } catch (e: Exception) {
+                pending.forEach { setStatus(it, UploadStatus.ERROR) }
+                _statusMessage.value = "Connection error: ${e.message?.take(80)}"
             }
 
-            val verifiedCount = _logs.value.count { it.uploadStatus == UploadStatus.VERIFIED }
-            _statusMessage.value = buildString {
-                append("$successCount uploaded & verified")
-                if (failCount > 0) append(", $failCount failed")
-                if (verifiedCount > 0) append(" — tap Delete to remove from controller")
-            }
             _isUploading.value = false
         }
     }
 
-    fun deleteVerified() {
+    fun deleteSynced() {
         viewModelScope.launch(Dispatchers.IO) {
-            val toDelete = _logs.value.filter { it.uploadStatus == UploadStatus.VERIFIED }
+            val toDelete = _logs.value.filter { it.uploadStatus == UploadStatus.SYNCED }
             var deleted = 0
             for (log in toDelete) {
                 if (log.file.delete()) {
@@ -168,15 +212,7 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) {
-                digest.update(buf, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+    /** Pull a bare filename out of an error string that may be a path or message. */
+    private fun extractFilename(error: String): String =
+        error.substringAfterLast('/').substringAfterLast('\\').trim()
 }
