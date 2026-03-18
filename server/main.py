@@ -6,7 +6,7 @@ import aiofiles
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="DroneDump Server", version="1.0.0")
+app = FastAPI(title="DroneOpsSync Server", version="1.0.0")
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/flightlogs"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

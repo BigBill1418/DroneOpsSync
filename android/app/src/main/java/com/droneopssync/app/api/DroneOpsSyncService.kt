@@ -1,6 +1,6 @@
-package com.dronedump.app.api
+package com.droneopssync.app.api
 
-import com.dronedump.app.model.UploadResult
+import com.droneopssync.app.model.UploadResult
 import okhttp3.MultipartBody
 import retrofit2.Response
 import retrofit2.http.GET
@@ -8,7 +8,7 @@ import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
 
-interface DroneDumpService {
+interface DroneOpsSyncService {
 
     @Multipart
     @POST("/upload")

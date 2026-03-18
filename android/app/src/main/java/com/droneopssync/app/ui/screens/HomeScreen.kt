@@ -1,4 +1,4 @@
-package com.dronedump.app.ui.screens
+package com.droneopssync.app.ui.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -33,10 +33,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dronedump.app.model.FlightLog
-import com.dronedump.app.model.UploadStatus
-import com.dronedump.app.ui.theme.*
-import com.dronedump.app.viewmodel.MainViewModel
+import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.UploadStatus
+import com.droneopssync.app.ui.theme.*
+import com.droneopssync.app.viewmodel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

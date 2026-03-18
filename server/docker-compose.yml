@@ -1,9 +1,9 @@
 version: "3.9"
 
 services:
-  dronedump:
+  droneopssync:
     build: .
-    container_name: dronedump-server
+    container_name: droneopssync-server
     restart: unless-stopped
     ports:
       - "7474:7474"

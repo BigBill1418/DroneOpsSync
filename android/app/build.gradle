@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace 'com.dronedump.app'
+    namespace 'com.droneopssync.app'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.dronedump.app"
+        applicationId "com.droneopssync.app"
         minSdk 26
         targetSdk 34
         versionCode 1

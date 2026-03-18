@@ -1,4 +1,4 @@
-package com.dronedump.app.ui.theme
+package com.droneopssync.app.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -17,7 +17,7 @@ private val BhqColorScheme = darkColorScheme(
 )
 
 @Composable
-fun DroneDumpTheme(content: @Composable () -> Unit) {
+fun DroneOpsSyncTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = BhqColorScheme,
         content = content

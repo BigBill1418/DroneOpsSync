@@ -1,4 +1,4 @@
-package com.dronedump.app.model
+package com.droneopssync.app.model
 
 import com.google.gson.annotations.SerializedName
 

@@ -1,4 +1,4 @@
-package com.dronedump.app.model
+package com.droneopssync.app.model
 
 import java.io.File
 import java.text.SimpleDateFormat

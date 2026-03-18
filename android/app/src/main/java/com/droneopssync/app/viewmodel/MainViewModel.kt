@@ -1,11 +1,11 @@
-package com.dronedump.app.viewmodel
+package com.droneopssync.app.viewmodel
 
 import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.dronedump.app.api.ApiClient
-import com.dronedump.app.model.FlightLog
-import com.dronedump.app.model.UploadStatus
+import com.droneopssync.app.api.ApiClient
+import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

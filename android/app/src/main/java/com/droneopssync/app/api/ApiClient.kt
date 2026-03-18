@@ -1,4 +1,4 @@
-package com.dronedump.app.api
+package com.droneopssync.app.api
 
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -6,7 +6,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
-    fun create(serverUrl: String): DroneDumpService {
+    fun create(serverUrl: String): DroneOpsSyncService {
         val client = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
@@ -20,6 +20,6 @@ object ApiClient {
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(DroneDumpService::class.java)
+            .create(DroneOpsSyncService::class.java)
     }
 }

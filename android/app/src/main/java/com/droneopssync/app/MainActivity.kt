@@ -1,4 +1,4 @@
-package com.dronedump.app
+package com.droneopssync.app
 
 import android.content.Intent
 import android.net.Uri
@@ -13,10 +13,10 @@ import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.dronedump.app.ui.screens.HomeScreen
-import com.dronedump.app.ui.screens.SettingsScreen
-import com.dronedump.app.ui.theme.DroneDumpTheme
-import com.dronedump.app.viewmodel.MainViewModel
+import com.droneopssync.app.ui.screens.HomeScreen
+import com.droneopssync.app.ui.screens.SettingsScreen
+import com.droneopssync.app.ui.theme.DroneOpsSyncTheme
+import com.droneopssync.app.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -35,12 +35,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val prefs = getSharedPreferences("dronedump_prefs", MODE_PRIVATE)
+        val prefs = getSharedPreferences("droneopssync_prefs", MODE_PRIVATE)
         viewModel.loadSettings(prefs)
         viewModel.checkServerHealth()
 
         setContent {
-            DroneDumpTheme {
+            DroneOpsSyncTheme {
                 val navController = rememberNavController()
                 val sharedPrefs = remember { prefs }
 

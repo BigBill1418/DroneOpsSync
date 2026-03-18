@@ -1,4 +1,4 @@
-package com.dronedump.app.ui.screens
+package com.droneopssync.app.ui.screens
 
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
@@ -13,8 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dronedump.app.ui.theme.*
-import com.dronedump.app.viewmodel.MainViewModel
+import com.droneopssync.app.ui.theme.*
+import com.droneopssync.app.viewmodel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,7 +75,7 @@ fun SettingsScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("NAS Server URL", color = BhqCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    "IP address and port of your Synology running DroneDump Server",
+                    "IP address and port of your Synology running DroneOpsSync Server",
                     color = BhqGrey, fontSize = 13.sp
                 )
                 OutlinedTextField(

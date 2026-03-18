@@ -1,4 +1,4 @@
-# DroneDump
+# DroneOpsSync
 Automated Flight Log Management Utility for DJI Smart Controllers
 
 Scans DJI flight log folders, uploads to a local NAS, verifies with SHA-256 checksums, then deletes from the controller only after confirmed transfer.
@@ -7,7 +7,7 @@ Scans DJI flight log folders, uploads to a local NAS, verifies with SHA-256 chec
 
 ## Components
 
-### 1. DroneDump Server (`/server`)
+### 1. DroneOpsSync Server (`/server`)
 FastAPI service running in Docker on Synology NAS. Accepts uploads on port **7474** and saves files to the Open DroneLog watch folder.
 
 **Deploy on Synology:**
@@ -17,7 +17,7 @@ cd server
 docker-compose up -d
 ```
 
-### 2. DroneDump Android App (`/android`)
+### 2. DroneOpsSync Android App (`/android`)
 Kotlin + Jetpack Compose APK. Sideload onto each DJI controller.
 
 **Build APK:**
