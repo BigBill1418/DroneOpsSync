@@ -7,7 +7,7 @@ import java.util.Locale
 
 data class FlightLog(
     val file: File,
-    var uploadStatus: UploadStatus = UploadStatus.PENDING
+    val uploadStatus: UploadStatus = UploadStatus.PENDING
 ) {
     val name: String get() = file.name
     val sizeBytes: Long get() = file.length()

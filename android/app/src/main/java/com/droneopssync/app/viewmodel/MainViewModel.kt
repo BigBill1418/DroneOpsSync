@@ -99,8 +99,9 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * Check server connectivity. Tries GET /api/health first; if that 404s,
-     * falls back to a simple GET / — any response at all proves the tunnel is up.
+     * Check server connectivity via GET /api/health.
+     * Any non-5xx response (including 404) counts as reachable — it proves
+     * the tunnel is up even if the health endpoint isn't wired yet.
      */
     fun checkServerHealth() {
         viewModelScope.launch(Dispatchers.IO) {

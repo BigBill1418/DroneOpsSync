@@ -373,38 +373,36 @@ fun HomeScreen(
 private fun ReadyToSyncBadge(serverReachable: Boolean?) {
     val isChecking = serverReachable == null
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
-        label = "dotPulse"
-    )
+    val statusColor = when (serverReachable) {
+        true  -> DocGreen
+        false -> DocRed
+        null  -> DocAmber
+    }
 
-    val dotColor by animateColorAsState(
-        targetValue = when (serverReachable) {
-            true  -> DocGreen
-            false -> DocRed
-            null  -> DocAmber
-        },
+    val animatedColor by animateColorAsState(
+        targetValue = statusColor,
         animationSpec = tween(400),
-        label = "dotColor"
-    )
-
-    val labelColor by animateColorAsState(
-        targetValue = when (serverReachable) {
-            true  -> DocGreen
-            false -> DocRed
-            null  -> DocAmber
-        },
-        animationSpec = tween(400),
-        label = "labelColor"
+        label = "badgeColor"
     )
 
     val label = when (serverReachable) {
         true  -> "Ready To Sync"
         false -> "Server Unreachable"
         null  -> "Checking…"
+    }
+
+    // Pulse animation only runs while checking (null state)
+    val dotScale = if (isChecking) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 1.3f,
+            animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+            label = "dotPulse"
+        )
+        scale
+    } else {
+        1f
     }
 
     Row(
@@ -414,14 +412,14 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .scale(if (isChecking) pulseScale else 1f)
+                .scale(dotScale)
                 .clip(CircleShape)
-                .background(dotColor)
+                .background(animatedColor)
         )
         Spacer(Modifier.width(9.dp))
         Text(
             text = label,
-            color = labelColor,
+            color = animatedColor,
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp,
             letterSpacing = 0.5.sp
