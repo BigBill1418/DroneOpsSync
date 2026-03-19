@@ -32,6 +32,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -51,9 +52,11 @@ fun HomeScreen(
     val statusMessage   by viewModel.statusMessage.collectAsState()
     val isUploading     by viewModel.isUploading.collectAsState()
     val serverReachable by viewModel.serverReachable.collectAsState()
+    val connectionError by viewModel.connectionError.collectAsState()
 
     val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED }
+    val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     // ── Delete confirmation dialog ────────────────────────────────────────────
@@ -122,13 +125,55 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            // Logo (PNG if droneops_sync_logo drawable present, text fallback otherwise)
+            // Logo
             BrandLogo()
 
             Spacer(Modifier.height(26.dp))
 
             // ── Ready To Sync indicator ──────────────────────────────────────
             ReadyToSyncBadge(serverReachable)
+
+            // ── Connection error detail + Retry button ───────────────────────
+            if (serverReachable == false) {
+                Spacer(Modifier.height(8.dp))
+
+                connectionError?.let { error ->
+                    Text(
+                        text = error,
+                        color = DocRed.copy(alpha = 0.75f),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth(0.82f)
+                            .padding(bottom = 8.dp),
+                        maxLines = 3
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = { viewModel.checkServerHealth() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.60f)
+                        .height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.5.dp, DocOrange.copy(alpha = 0.7f))
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = DocOrange
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "RETRY CONNECTION",
+                        color = DocOrange,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        fontSize = 12.sp
+                    )
+                }
+            }
 
             Spacer(Modifier.height(26.dp))
 
@@ -203,6 +248,35 @@ fun HomeScreen(
                     letterSpacing = 1.sp,
                     fontSize = 14.sp
                 )
+            }
+
+            // ── Retry failed uploads ─────────────────────────────────────────
+            if (hasErrors && !isUploading) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { viewModel.retryFailed() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.82f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.5.dp, DocAmber.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        Icons.Default.Replay,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = DocAmber
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    val errorCount = logs.count { it.uploadStatus == UploadStatus.ERROR }
+                    Text(
+                        "RETRY $errorCount FAILED",
+                        color = DocAmber,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.8.sp,
+                        fontSize = 14.sp
+                    )
+                }
             }
 
             // ── Delete synced (conditional) ──────────────────────────────────
@@ -331,20 +405,20 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 private fun BrandLogo() {
     val context = LocalContext.current
     val resId = remember {
-        context.resources.getIdentifier("droneops_sync_logo", "drawable", context.packageName)
+        context.resources.getIdentifier("barnard_hq_logo", "drawable", context.packageName)
     }
 
     if (resId != 0) {
         Image(
             painter = painterResource(resId),
-            contentDescription = "DroneOpsSync — Flight Log Sync",
+            contentDescription = "BarnardHQ — Professional Aerial Operations",
             modifier = Modifier
                 .fillMaxWidth(0.72f)
                 .aspectRatio(2.5f),
             contentScale = ContentScale.Fit
         )
     } else {
-        // Text fallback until droneops_sync_logo.png is added to res/drawable/
+        // Text fallback until barnard_hq_logo.png is added to res/drawable/
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Default.Flight,
