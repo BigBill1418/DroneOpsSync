@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -335,6 +337,33 @@ fun HomeScreen(
                     LogFileCard(log)
                 }
             }
+        }
+
+        // ── Footer — BarnardHQ link ─────────────────────────────────────────
+        HorizontalDivider(color = DocDivider, thickness = 1.dp)
+        val uriHandler = LocalUriHandler.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DocPanel)
+                .clickable { uriHandler.openUri("https://www.barnardhq.com") }
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Language,
+                contentDescription = null,
+                tint = DocCyan.copy(alpha = 0.6f),
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "www.barnardhq.com",
+                color = DocCyan.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                letterSpacing = 0.5.sp
+            )
         }
     }
 }

@@ -15,6 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.droneopssync.app.ui.screens.HomeScreen
 import com.droneopssync.app.ui.screens.SettingsScreen
+import com.droneopssync.app.ui.screens.SplashScreen
 import com.droneopssync.app.ui.theme.DroneOpsSyncTheme
 import com.droneopssync.app.viewmodel.MainViewModel
 
@@ -44,7 +45,16 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val sharedPrefs = remember { prefs }
 
-                NavHost(navController = navController, startDestination = "home") {
+                NavHost(navController = navController, startDestination = "splash") {
+                    composable("splash") {
+                        SplashScreen(
+                            onFinished = {
+                                navController.navigate("home") {
+                                    popUpTo("splash") { inclusive = true }
+                                }
+                            }
+                        )
+                    }
                     composable("home") {
                         HomeScreen(
                             viewModel = viewModel,
