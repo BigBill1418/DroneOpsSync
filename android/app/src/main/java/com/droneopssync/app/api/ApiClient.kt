@@ -74,6 +74,16 @@ object ApiClient {
             .followRedirects(true)
             .followSslRedirects(true)
 
+        // Set a browser-like User-Agent so Cloudflare's Browser Integrity Check
+        // does not intercept requests and return an HTML challenge page instead of JSON.
+        builder.addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Android; DroneOpsSync) AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
+                .header("Accept", "application/json")
+                .build()
+            chain.proceed(request)
+        }
+
         // Logging interceptor — only in debug builds, but safe to always attach
         val logging = HttpLoggingInterceptor { message -> Log.d(TAG, message) }
         logging.level = HttpLoggingInterceptor.Level.HEADERS
