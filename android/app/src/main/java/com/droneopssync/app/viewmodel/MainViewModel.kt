@@ -102,7 +102,8 @@ class MainViewModel : ViewModel() {
      * Check server connectivity via GET /api/health.
      * Any non-5xx response (including 404) counts as reachable — it proves
      * the tunnel is up even if the health endpoint isn't wired yet.
-     */    fun checkServerHealth() {
+     */
+    fun checkServerHealth() {
         viewModelScope.launch(Dispatchers.IO) {
             _serverReachable.value = null
             _connectionError.value = null
@@ -316,7 +317,7 @@ class MainViewModel : ViewModel() {
 
     /** Retry [block] up to [maxAttempts] times on [IOException], with exponential backoff. */
     private suspend fun <T> withIoRetry(maxAttempts: Int = 3, block: suspend () -> T): T {
-        var lastException: IOException? = null
+        var lastException: IOException = IOException("Unknown IO error")
         for (attempt in 1..maxAttempts) {
             try {
                 return block()
@@ -329,7 +330,7 @@ class MainViewModel : ViewModel() {
                 }
             }
         }
-        throw lastException!!
+        throw lastException
     }
 
     /** Returns true if this string is a usable http/https URL. */
