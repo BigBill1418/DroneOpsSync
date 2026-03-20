@@ -31,10 +31,12 @@ private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
 )
 
-private const val PREF_SERVER_URL  = "server_url"
-private const val PREF_API_KEY     = "api_key"
-private const val PREF_LOG_PATHS   = "log_paths"
-private const val DEFAULT_SERVER   = ""
+private const val PREF_SERVER_URL    = "server_url"
+private const val PREF_API_KEY       = "api_key"
+private const val PREF_LOG_PATHS     = "log_paths"
+private const val PREF_CF_CLIENT_ID  = "cf_client_id"
+private const val PREF_CF_CLIENT_SECRET = "cf_client_secret"
+private const val DEFAULT_SERVER     = ""
 
 class MainViewModel : ViewModel() {
 
@@ -46,6 +48,12 @@ class MainViewModel : ViewModel() {
 
     private val _apiKey = MutableStateFlow("")
     val apiKey: StateFlow<String> = _apiKey
+
+    private val _cfClientId = MutableStateFlow("")
+    val cfClientId: StateFlow<String> = _cfClientId
+
+    private val _cfClientSecret = MutableStateFlow("")
+    val cfClientSecret: StateFlow<String> = _cfClientSecret
 
     private val _logPathsText = MutableStateFlow(DEFAULT_PATHS.joinToString("\n"))
     val logPathsText: StateFlow<String> = _logPathsText
@@ -68,24 +76,38 @@ class MainViewModel : ViewModel() {
         _apiKey.value       = prefs.getString(PREF_API_KEY, "") ?: ""
         _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
             ?: DEFAULT_PATHS.joinToString("\n")
+        _cfClientId.value     = prefs.getString(PREF_CF_CLIENT_ID, "") ?: ""
+        _cfClientSecret.value = prefs.getString(PREF_CF_CLIENT_SECRET, "") ?: ""
+        ApiClient.cfClientId     = _cfClientId.value
+        ApiClient.cfClientSecret = _cfClientSecret.value
     }
 
     fun saveSettings(
         prefs: SharedPreferences,
         serverUrl: String,
         apiKey: String,
-        logPathsText: String
+        logPathsText: String,
+        cfClientId: String = "",
+        cfClientSecret: String = ""
     ) {
         val trimmedUrl = serverUrl.trim()
         val urlChanged = trimmedUrl != _serverUrl.value
 
-        _serverUrl.value    = trimmedUrl
-        _apiKey.value       = apiKey.trim()
-        _logPathsText.value = logPathsText
+        _serverUrl.value      = trimmedUrl
+        _apiKey.value         = apiKey.trim()
+        _logPathsText.value   = logPathsText
+        _cfClientId.value     = cfClientId.trim()
+        _cfClientSecret.value = cfClientSecret.trim()
+
+        ApiClient.cfClientId     = cfClientId.trim()
+        ApiClient.cfClientSecret = cfClientSecret.trim()
+
         prefs.edit()
             .putString(PREF_SERVER_URL, trimmedUrl)
             .putString(PREF_API_KEY, apiKey.trim())
             .putString(PREF_LOG_PATHS, logPathsText)
+            .putString(PREF_CF_CLIENT_ID, cfClientId.trim())
+            .putString(PREF_CF_CLIENT_SECRET, cfClientSecret.trim())
             .apply()
         _statusMessage.value = "Settings saved"
 

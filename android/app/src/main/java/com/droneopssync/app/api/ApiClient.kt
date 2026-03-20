@@ -17,6 +17,10 @@ object ApiClient {
 
     private const val TAG = "ApiClient"
 
+    /** Cloudflare Access service token credentials — set from MainViewModel on load/save. */
+    var cfClientId: String = ""
+    var cfClientSecret: String = ""
+
     /**
      * Shared OkHttpClient — connection pool and TLS session cache survive across
      * health checks, uploads, and retries. This is the single biggest fix for
@@ -73,6 +77,18 @@ object ApiClient {
             .retryOnConnectionFailure(true)         // OkHttp-level transparent retry
             .followRedirects(true)
             .followSslRedirects(true)
+
+        // Set a browser-like User-Agent so Cloudflare's Browser Integrity Check
+        // does not intercept requests and return an HTML challenge page instead of JSON.
+        // Also attach Cloudflare Access service token headers if configured.
+        builder.addInterceptor { chain ->
+            val req = chain.request().newBuilder()
+                .header("User-Agent", "Mozilla/5.0 (Android; DroneOpsSync) AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
+                .header("Accept", "application/json")
+            if (cfClientId.isNotBlank()) req.header("CF-Access-Client-Id", cfClientId)
+            if (cfClientSecret.isNotBlank()) req.header("CF-Access-Client-Secret", cfClientSecret)
+            chain.proceed(req.build())
+        }
 
         // Logging interceptor — only in debug builds, but safe to always attach
         val logging = HttpLoggingInterceptor { message -> Log.d(TAG, message) }
