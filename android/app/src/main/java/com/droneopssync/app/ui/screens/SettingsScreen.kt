@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -32,20 +31,15 @@ fun SettingsScreen(
     prefs: SharedPreferences,
     onBack: () -> Unit
 ) {
-    val currentServerUrl    by viewModel.serverUrl.collectAsState()
-    val currentApiKey       by viewModel.apiKey.collectAsState()
-    val currentLogPaths     by viewModel.logPathsText.collectAsState()
-    val currentCfClientId   by viewModel.cfClientId.collectAsState()
-    val currentCfClientSecret by viewModel.cfClientSecret.collectAsState()
+    val currentServerUrl by viewModel.serverUrl.collectAsState()
+    val currentApiKey    by viewModel.apiKey.collectAsState()
+    val currentLogPaths  by viewModel.logPathsText.collectAsState()
 
-    var serverUrl    by remember(currentServerUrl)    { mutableStateOf(currentServerUrl) }
-    var apiKey       by remember(currentApiKey)       { mutableStateOf(currentApiKey) }
-    var logPaths     by remember(currentLogPaths)     { mutableStateOf(currentLogPaths) }
-    var cfClientId   by remember(currentCfClientId)   { mutableStateOf(currentCfClientId) }
-    var cfClientSecret by remember(currentCfClientSecret) { mutableStateOf(currentCfClientSecret) }
-    var saved        by remember { mutableStateOf(false) }
-    var apiKeyVisible by remember { mutableStateOf(false) }
-    var cfSecretVisible by remember { mutableStateOf(false) }
+    var serverUrl by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
+    var apiKey    by remember(currentApiKey)    { mutableStateOf(currentApiKey) }
+    var logPaths  by remember(currentLogPaths)  { mutableStateOf(currentLogPaths) }
+    var saved          by remember { mutableStateOf(false) }
+    var apiKeyVisible  by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = DocDeep,
@@ -60,7 +54,7 @@ fun SettingsScreen(
                 },
                 actions = {
                     IconButton(onClick = {
-                        viewModel.saveSettings(prefs, serverUrl, apiKey, logPaths, cfClientId, cfClientSecret)
+                        viewModel.saveSettings(prefs, serverUrl, apiKey, logPaths)
                         saved = true
                     }) {
                         Icon(Icons.Default.Save, contentDescription = "Save", tint = DocCyan)
@@ -90,14 +84,9 @@ fun SettingsScreen(
 
             // ── DroneOpsCommand URL ───────────────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("DroneOpsCommand URL", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    "DroneOpsCommand URL",
-                    color = DocCyan,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Text(
-                    "Public URL of your DroneOpsCommand instance — Cloudflare tunnel or local address",
+                    "Local IP (e.g. http://192.168.1.50:8080) or WireGuard VPN IP for remote access",
                     color = DocMuted,
                     fontSize = 13.sp
                 )
@@ -105,7 +94,7 @@ fun SettingsScreen(
                     value = serverUrl,
                     onValueChange = { serverUrl = it; saved = false },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("https://your-tunnel.your-domain.com", color = DocMuted) },
+                    placeholder = { Text("http://192.168.1.50:8080", color = DocMuted) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = DocCyan,
@@ -121,17 +110,8 @@ fun SettingsScreen(
 
             // ── Device API Key ────────────────────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Device API Key",
-                    color = DocCyan,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Text(
-                    "Found in DroneOpsCommand → Settings → Device Access",
-                    color = DocMuted,
-                    fontSize = 13.sp
-                )
+                Text("Device API Key", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Found in DroneOpsCommand → Settings → Device Access", color = DocMuted, fontSize = 13.sp)
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it; saved = false },
@@ -162,73 +142,9 @@ fun SettingsScreen(
 
             HorizontalDivider(color = DocDivider)
 
-            // ── Cloudflare Access (optional) ──────────────────────────────────────
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Cloudflare Access (optional)",
-                    color = DocCyan,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Text(
-                    "Required only if your tunnel is protected by Cloudflare Access. Leave blank if not using Access.",
-                    color = DocMuted,
-                    fontSize = 13.sp
-                )
-                OutlinedTextField(
-                    value = cfClientId,
-                    onValueChange = { cfClientId = it; saved = false },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("CF-Access-Client-Id", color = DocMuted) },
-                    placeholder = { Text("xxxxxxxx.access", color = DocMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = DocCyan,
-                        unfocusedBorderColor = DocSurface,
-                        focusedTextColor     = DocWhite,
-                        unfocusedTextColor   = DocWhite,
-                        cursorColor          = DocCyan
-                    )
-                )
-                OutlinedTextField(
-                    value = cfClientSecret,
-                    onValueChange = { cfClientSecret = it; saved = false },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("CF-Access-Client-Secret", color = DocMuted) },
-                    placeholder = { Text("Paste secret here", color = DocMuted) },
-                    singleLine = true,
-                    visualTransformation = if (cfSecretVisible) VisualTransformation.None
-                                          else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { cfSecretVisible = !cfSecretVisible }) {
-                            Icon(
-                                if (cfSecretVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (cfSecretVisible) "Hide" else "Show",
-                                tint = DocMuted
-                            )
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = DocCyan,
-                        unfocusedBorderColor = DocSurface,
-                        focusedTextColor     = DocWhite,
-                        unfocusedTextColor   = DocWhite,
-                        cursorColor          = DocCyan
-                    )
-                )
-            }
-
-            HorizontalDivider(color = DocDivider)
-
             // ── Flight Log Paths ─────────────────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Flight Log Paths",
-                    color = DocCyan,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
+                Text("Flight Log Paths", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
                     "One path per line. Paths that don't exist on this controller are silently skipped.",
                     color = DocMuted,
@@ -260,23 +176,11 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text("How it works", color = DocCyan, fontWeight = FontWeight.Bold)
-                    Text(
-                        "1. Tap SCAN FOR LOGS — finds .txt/.log files in all configured paths",
-                        color = DocMuted, fontSize = 13.sp
-                    )
-                    Text(
-                        "2. Tap SYNC ALL — uploads logs to DroneOpsCommand via Cloudflare tunnel",
-                        color = DocMuted, fontSize = 13.sp
-                    )
-                    Text(
-                        "3. Tap DELETE — removes synced files from this controller only",
-                        color = DocMuted, fontSize = 13.sp
-                    )
+                    Text("1. Tap SCAN FOR LOGS — finds .txt/.log files in all configured paths", color = DocMuted, fontSize = 13.sp)
+                    Text("2. Tap SYNC ALL — uploads logs to DroneOpsCommand over LAN or VPN", color = DocMuted, fontSize = 13.sp)
+                    Text("3. Tap DELETE — removes synced files from this controller only", color = DocMuted, fontSize = 13.sp)
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Files are never deleted automatically — you must confirm.",
-                        color = DocRed, fontSize = 12.sp, fontWeight = FontWeight.Bold
-                    )
+                    Text("Files are never deleted automatically — you must confirm.", color = DocRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
 

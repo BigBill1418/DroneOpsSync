@@ -8,7 +8,6 @@ import com.droneopssync.app.api.ApiClient
 import com.droneopssync.app.model.FlightLog
 import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -19,8 +18,6 @@ import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import javax.net.ssl.SSLException
-import javax.net.ssl.SSLHandshakeException
 
 private const val TAG = "MainViewModel"
 
@@ -31,12 +28,10 @@ private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
 )
 
-private const val PREF_SERVER_URL    = "server_url"
-private const val PREF_API_KEY       = "api_key"
-private const val PREF_LOG_PATHS     = "log_paths"
-private const val PREF_CF_CLIENT_ID  = "cf_client_id"
-private const val PREF_CF_CLIENT_SECRET = "cf_client_secret"
-private const val DEFAULT_SERVER     = ""
+private const val PREF_SERVER_URL = "server_url"
+private const val PREF_API_KEY    = "api_key"
+private const val PREF_LOG_PATHS  = "log_paths"
+private const val DEFAULT_SERVER  = ""
 
 class MainViewModel : ViewModel() {
 
@@ -48,12 +43,6 @@ class MainViewModel : ViewModel() {
 
     private val _apiKey = MutableStateFlow("")
     val apiKey: StateFlow<String> = _apiKey
-
-    private val _cfClientId = MutableStateFlow("")
-    val cfClientId: StateFlow<String> = _cfClientId
-
-    private val _cfClientSecret = MutableStateFlow("")
-    val cfClientSecret: StateFlow<String> = _cfClientSecret
 
     private val _logPathsText = MutableStateFlow(DEFAULT_PATHS.joinToString("\n"))
     val logPathsText: StateFlow<String> = _logPathsText
@@ -67,7 +56,6 @@ class MainViewModel : ViewModel() {
     private val _serverReachable = MutableStateFlow<Boolean?>(null)
     val serverReachable: StateFlow<Boolean?> = _serverReachable
 
-    /** Detailed connection error for diagnostics (shown below Retry button). */
     private val _connectionError = MutableStateFlow<String?>(null)
     val connectionError: StateFlow<String?> = _connectionError
 
@@ -76,55 +64,32 @@ class MainViewModel : ViewModel() {
         _apiKey.value       = prefs.getString(PREF_API_KEY, "") ?: ""
         _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
             ?: DEFAULT_PATHS.joinToString("\n")
-        _cfClientId.value     = prefs.getString(PREF_CF_CLIENT_ID, "") ?: ""
-        _cfClientSecret.value = prefs.getString(PREF_CF_CLIENT_SECRET, "") ?: ""
-        ApiClient.cfClientId     = _cfClientId.value
-        ApiClient.cfClientSecret = _cfClientSecret.value
     }
 
     fun saveSettings(
         prefs: SharedPreferences,
         serverUrl: String,
         apiKey: String,
-        logPathsText: String,
-        cfClientId: String = "",
-        cfClientSecret: String = ""
+        logPathsText: String
     ) {
         val trimmedUrl = serverUrl.trim()
         val urlChanged = trimmedUrl != _serverUrl.value
 
-        _serverUrl.value      = trimmedUrl
-        _apiKey.value         = apiKey.trim()
-        _logPathsText.value   = logPathsText
-        _cfClientId.value     = cfClientId.trim()
-        _cfClientSecret.value = cfClientSecret.trim()
-
-        ApiClient.cfClientId     = cfClientId.trim()
-        ApiClient.cfClientSecret = cfClientSecret.trim()
+        _serverUrl.value    = trimmedUrl
+        _apiKey.value       = apiKey.trim()
+        _logPathsText.value = logPathsText
 
         prefs.edit()
             .putString(PREF_SERVER_URL, trimmedUrl)
             .putString(PREF_API_KEY, apiKey.trim())
             .putString(PREF_LOG_PATHS, logPathsText)
-            .putString(PREF_CF_CLIENT_ID, cfClientId.trim())
-            .putString(PREF_CF_CLIENT_SECRET, cfClientSecret.trim())
             .apply()
         _statusMessage.value = "Settings saved"
 
-        // Invalidate cached Retrofit service so ApiClient picks up the new URL
-        if (urlChanged) {
-            ApiClient.invalidate()
-        }
-
-        // Re-check server health with new settings
+        if (urlChanged) ApiClient.invalidate()
         checkServerHealth()
     }
 
-    /**
-     * Check server connectivity via GET /api/health.
-     * Any non-5xx response (including 404) counts as reachable — it proves
-     * the tunnel is up even if the health endpoint isn't wired yet.
-     */
     fun checkServerHealth() {
         viewModelScope.launch(Dispatchers.IO) {
             _serverReachable.value = null
@@ -144,54 +109,21 @@ class MainViewModel : ViewModel() {
             }
 
             try {
-                Log.d(TAG, "Health check → $url")
-                val service = ApiClient.create(url)
-                val response = service.health()
-
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Health check OK (${response.code()})")
-                    _serverReachable.value = true
-                    _connectionError.value = null
-                    return@launch
+                val response = ApiClient.create(url).health()
+                _serverReachable.value = response.code() < 500
+                if (response.code() >= 500) {
+                    _connectionError.value = "Server returned HTTP ${response.code()}"
                 }
-
-                // Any non-5xx response means the server is there and responding
-                // (404 = /api/health not wired up yet, 401 = auth required, etc.)
-                if (response.code() < 500) {
-                    Log.d(TAG, "Health check got ${response.code()} — server is reachable")
-                    _serverReachable.value = true
-                    _connectionError.value = null
-                    return@launch
-                }
-
-                // 5xx — server error
-                _serverReachable.value = false
-                _connectionError.value = "Server returned HTTP ${response.code()}"
-
             } catch (e: UnknownHostException) {
-                Log.e(TAG, "Health check DNS failure", e)
                 _serverReachable.value = false
-                _connectionError.value = "DNS lookup failed — check the URL or your internet connection"
+                _connectionError.value = "DNS lookup failed — check the URL"
             } catch (e: SocketTimeoutException) {
-                Log.e(TAG, "Health check timeout", e)
                 _serverReachable.value = false
-                _connectionError.value = "Connection timed out — server may be down or URL may be wrong"
-            } catch (e: SSLHandshakeException) {
-                Log.e(TAG, "Health check TLS handshake failed", e)
-                _serverReachable.value = false
-                _connectionError.value = "TLS/SSL handshake failed — certificate issue with tunnel"
-            } catch (e: SSLException) {
-                Log.e(TAG, "Health check SSL error", e)
-                _serverReachable.value = false
-                _connectionError.value = "SSL error: ${e.message?.take(120)}"
+                _connectionError.value = "Connection timed out — is the server running?"
             } catch (e: IOException) {
-                Log.e(TAG, "Health check IO error", e)
+                Log.e(TAG, "Health check failed", e)
                 _serverReachable.value = false
                 _connectionError.value = "Network error: ${e.message?.take(120)}"
-            } catch (e: Exception) {
-                Log.e(TAG, "Health check unexpected error", e)
-                _serverReachable.value = false
-                _connectionError.value = "Error: ${e.javaClass.simpleName} — ${e.message?.take(100)}"
             }
         }
     }
@@ -234,7 +166,7 @@ class MainViewModel : ViewModel() {
             val url = _serverUrl.value
             val key = _apiKey.value
             if (url.isBlank() || key.isBlank()) {
-                _statusMessage.value = "Configure DroneOpsCommand URL and API key in Settings"
+                _statusMessage.value = "Configure server URL and API key in Settings"
                 return@launch
             }
             if (!url.isValidUrl()) {
@@ -251,15 +183,11 @@ class MainViewModel : ViewModel() {
                     MultipartBody.Part.createFormData("files", log.file.name, body)
                 }
 
-                // Retry up to 2 times on transient network failures
-                val response = withIoRetry(maxAttempts = 3) {
-                    ApiClient.create(url).uploadFlights(key, parts)
-                }
+                val response = ApiClient.create(url).uploadFlights(key, parts)
                 val body = response.body()
 
                 if (response.isSuccessful && body != null) {
                     pending.forEach { setStatus(it, UploadStatus.SYNCED) }
-
                     _statusMessage.value = buildString {
                         if (body.imported > 0) append("${body.imported} imported")
                         if (body.skipped > 0) {
@@ -275,23 +203,19 @@ class MainViewModel : ViewModel() {
                         if (syncedCount > 0) append(" — tap Delete to clean up controller")
                     }
                 } else {
-                    val code = response.code()
                     pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    _statusMessage.value = when (code) {
+                    _statusMessage.value = when (response.code()) {
                         401, 403 -> "Invalid API key — check Settings"
-                        404      -> "Upload endpoint not found — update DroneOpsCommand backend"
-                        else     -> "Upload failed (HTTP $code)"
+                        404      -> "Upload endpoint not found — check server URL"
+                        else     -> "Upload failed (HTTP ${response.code()})"
                     }
                 }
             } catch (e: UnknownHostException) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "DNS lookup failed — check URL and internet connection"
+                _statusMessage.value = "DNS lookup failed — check URL"
             } catch (e: SocketTimeoutException) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "Connection timed out — server may be down"
-            } catch (e: SSLException) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "SSL/TLS error — ${e.message?.take(80)}"
             } catch (e: Exception) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "Connection error: ${e.message?.take(100)}"
@@ -301,7 +225,6 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Reset ERROR files back to PENDING so user can retry without a full rescan. */
     fun retryFailed() {
         _logs.value = _logs.value.map {
             if (it.uploadStatus == UploadStatus.ERROR) it.copy(uploadStatus = UploadStatus.PENDING)
@@ -337,25 +260,6 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Retry [block] up to [maxAttempts] times on [IOException], with exponential backoff. */
-    private suspend fun <T> withIoRetry(maxAttempts: Int = 3, block: suspend () -> T): T {
-        var lastException: IOException = IOException("Unknown IO error")
-        for (attempt in 1..maxAttempts) {
-            try {
-                return block()
-            } catch (e: IOException) {
-                lastException = e
-                Log.w(TAG, "IO attempt $attempt/$maxAttempts failed: ${e.message}")
-                if (attempt < maxAttempts) {
-                    val backoff = (1L shl (attempt - 1)) * 2000L  // 2s, 4s
-                    delay(backoff)
-                }
-            }
-        }
-        throw lastException
-    }
-
-    /** Returns true if this string is a usable http/https URL. */
     private fun String.isValidUrl(): Boolean =
         startsWith("http://") || startsWith("https://")
 }
