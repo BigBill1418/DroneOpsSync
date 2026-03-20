@@ -8,7 +8,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,11 +28,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -535,48 +531,31 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
     }
 }
 
-// ── Brand logo — PNG if present, Compose text fallback otherwise ─────────────
+// ── Brand logo — orange DroneOpsSync wordmark ─────────────────────────────────
 @Composable
 private fun BrandLogo() {
-    val context = LocalContext.current
-    val resId = remember {
-        context.resources.getIdentifier("barnard_hq_logo", "drawable", context.packageName)
-    }
-
-    if (resId != 0) {
-        Image(
-            painter = painterResource(resId),
-            contentDescription = "BarnardHQ — Professional Aerial Operations",
-            modifier = Modifier
-                .fillMaxWidth(0.72f)
-                .aspectRatio(2.5f),
-            contentScale = ContentScale.Fit
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            Icons.Default.Flight,
+            contentDescription = null,
+            tint = DocOrange,
+            modifier = Modifier.size(56.dp)
         )
-    } else {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Default.Flight,
-                contentDescription = null,
-                tint = DocCyan,
-                modifier = Modifier.size(56.dp)
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = DocWhite)) { append("DroneOps") }
-                    withStyle(SpanStyle(color = DocCyan))  { append("Sync") }
-                },
-                fontWeight = FontWeight.Bold,
-                fontSize = 36.sp
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "FLIGHT LOG SYNC",
-                color = DocMuted,
-                fontSize = 11.sp,
-                letterSpacing = 2.sp
-            )
-        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = DocOrange, fontWeight = FontWeight.ExtraBold)) { append("DroneOps") }
+                withStyle(SpanStyle(color = DocOrange.copy(alpha = 0.75f), fontWeight = FontWeight.Light)) { append("Sync") }
+            },
+            fontSize = 36.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "FLIGHT LOG SYNC",
+            color = DocMuted,
+            fontSize = 11.sp,
+            letterSpacing = 2.sp
+        )
     }
 }
 
