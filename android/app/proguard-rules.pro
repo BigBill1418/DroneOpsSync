@@ -15,7 +15,7 @@
 -keep class okhttp3.** { *; }
 
 # Keep Gson serialized models
--keep class com.dronedump.app.model.** { *; }
+-keep class com.droneopssync.app.model.** { *; }
 
 # Keep Coroutines
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}

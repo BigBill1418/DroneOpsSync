@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,11 +28,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -51,9 +54,11 @@ fun HomeScreen(
     val statusMessage   by viewModel.statusMessage.collectAsState()
     val isUploading     by viewModel.isUploading.collectAsState()
     val serverReachable by viewModel.serverReachable.collectAsState()
+    val connectionError by viewModel.connectionError.collectAsState()
 
     val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED }
+    val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     // ── Delete confirmation dialog ────────────────────────────────────────────
@@ -122,13 +127,55 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            // Logo (PNG if droneops_sync_logo drawable present, text fallback otherwise)
+            // Logo
             BrandLogo()
 
             Spacer(Modifier.height(26.dp))
 
             // ── Ready To Sync indicator ──────────────────────────────────────
             ReadyToSyncBadge(serverReachable)
+
+            // ── Connection error detail + Retry button ───────────────────────
+            if (serverReachable == false) {
+                Spacer(Modifier.height(8.dp))
+
+                connectionError?.let { error ->
+                    Text(
+                        text = error,
+                        color = DocRed.copy(alpha = 0.75f),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth(0.82f)
+                            .padding(bottom = 8.dp),
+                        maxLines = 3
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = { viewModel.checkServerHealth() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.60f)
+                        .height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.5.dp, DocOrange.copy(alpha = 0.7f))
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = DocOrange
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "RETRY CONNECTION",
+                        color = DocOrange,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        fontSize = 12.sp
+                    )
+                }
+            }
 
             Spacer(Modifier.height(26.dp))
 
@@ -205,6 +252,35 @@ fun HomeScreen(
                 )
             }
 
+            // ── Retry failed uploads ─────────────────────────────────────────
+            if (hasErrors && !isUploading) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { viewModel.retryFailed() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.82f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.5.dp, DocAmber.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        Icons.Default.Replay,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = DocAmber
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    val errorCount = logs.count { it.uploadStatus == UploadStatus.ERROR }
+                    Text(
+                        "RETRY $errorCount FAILED",
+                        color = DocAmber,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.8.sp,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
             // ── Delete synced (conditional) ──────────────────────────────────
             if (hasSynced) {
                 Spacer(Modifier.height(10.dp))
@@ -262,6 +338,33 @@ fun HomeScreen(
                 }
             }
         }
+
+        // ── Footer — BarnardHQ link ─────────────────────────────────────────
+        HorizontalDivider(color = DocDivider, thickness = 1.dp)
+        val uriHandler = LocalUriHandler.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DocPanel)
+                .clickable { uriHandler.openUri("https://www.barnardhq.com") }
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Language,
+                contentDescription = null,
+                tint = DocCyan.copy(alpha = 0.6f),
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "www.barnardhq.com",
+                color = DocCyan.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                letterSpacing = 0.5.sp
+            )
+        }
     }
 }
 
@@ -270,38 +373,36 @@ fun HomeScreen(
 private fun ReadyToSyncBadge(serverReachable: Boolean?) {
     val isChecking = serverReachable == null
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
-        label = "dotPulse"
-    )
+    val statusColor = when (serverReachable) {
+        true  -> DocGreen
+        false -> DocRed
+        null  -> DocAmber
+    }
 
-    val dotColor by animateColorAsState(
-        targetValue = when (serverReachable) {
-            true  -> DocGreen
-            false -> DocRed
-            null  -> DocAmber
-        },
+    val animatedColor by animateColorAsState(
+        targetValue = statusColor,
         animationSpec = tween(400),
-        label = "dotColor"
-    )
-
-    val labelColor by animateColorAsState(
-        targetValue = when (serverReachable) {
-            true  -> DocGreen
-            false -> DocRed
-            null  -> DocAmber
-        },
-        animationSpec = tween(400),
-        label = "labelColor"
+        label = "badgeColor"
     )
 
     val label = when (serverReachable) {
         true  -> "Ready To Sync"
         false -> "Server Unreachable"
         null  -> "Checking…"
+    }
+
+    // Pulse animation only runs while checking (null state)
+    val dotScale = if (isChecking) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 1.3f,
+            animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+            label = "dotPulse"
+        )
+        scale
+    } else {
+        1f
     }
 
     Row(
@@ -311,14 +412,14 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .scale(if (isChecking) pulseScale else 1f)
+                .scale(dotScale)
                 .clip(CircleShape)
-                .background(dotColor)
+                .background(animatedColor)
         )
         Spacer(Modifier.width(9.dp))
         Text(
             text = label,
-            color = labelColor,
+            color = animatedColor,
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp,
             letterSpacing = 0.5.sp
@@ -331,20 +432,20 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 private fun BrandLogo() {
     val context = LocalContext.current
     val resId = remember {
-        context.resources.getIdentifier("droneops_sync_logo", "drawable", context.packageName)
+        context.resources.getIdentifier("barnard_hq_logo", "drawable", context.packageName)
     }
 
     if (resId != 0) {
         Image(
             painter = painterResource(resId),
-            contentDescription = "DroneOpsSync — Flight Log Sync",
+            contentDescription = "BarnardHQ — Professional Aerial Operations",
             modifier = Modifier
                 .fillMaxWidth(0.72f)
                 .aspectRatio(2.5f),
             contentScale = ContentScale.Fit
         )
     } else {
-        // Text fallback until droneops_sync_logo.png is added to res/drawable/
+        // Text fallback until barnard_hq_logo.png is added to res/drawable/
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Default.Flight,
