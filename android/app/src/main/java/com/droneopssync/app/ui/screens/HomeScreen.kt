@@ -1,5 +1,6 @@
 package com.droneopssync.app.ui.screens
 
+import android.content.res.Configuration
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,8 +14,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -61,6 +65,8 @@ fun HomeScreen(
     val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     // ── Delete confirmation dialog ────────────────────────────────────────────
     if (showDeleteDialog) {
         AlertDialog(
@@ -90,281 +96,384 @@ fun HomeScreen(
         )
     }
 
-    // ── Root ──────────────────────────────────────────────────────────────────
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DocDeep)
-    ) {
-
-        // ── Minimal top bar ──────────────────────────────────────────────────
+    if (isLandscape) {
+        // ── Landscape: left controls panel + right log list ───────────────────
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .background(DocDeep)
         ) {
-            IconButton(onClick = onNavigateToSettings) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = DocMuted)
+            // Left panel — settings button + hero controls (scrollable)
+            Column(
+                modifier = Modifier
+                    .weight(0.42f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = DocMuted)
+                    }
+                }
+
+                HeroContent(
+                    serverReachable  = serverReachable,
+                    connectionError  = connectionError,
+                    hasPending       = hasPending,
+                    hasErrors        = hasErrors,
+                    hasSynced        = hasSynced,
+                    isUploading      = isUploading,
+                    logs             = logs,
+                    onRetryConnection = { viewModel.checkServerHealth() },
+                    onUploadAll      = { viewModel.uploadAll() },
+                    onScanLogs       = { viewModel.scanLogs() },
+                    onRetryFailed    = { viewModel.retryFailed() },
+                    onDeleteSynced   = { showDeleteDialog = true }
+                )
+            }
+
+            VerticalDivider(color = DocDivider, thickness = 1.dp)
+
+            // Right panel — status bar + log list + footer
+            Column(
+                modifier = Modifier
+                    .weight(0.58f)
+                    .fillMaxHeight()
+            ) {
+                StatusBar(statusMessage)
+                HorizontalDivider(color = DocDivider, thickness = 1.dp)
+
+                if (logs.isEmpty()) {
+                    EmptyState(modifier = Modifier.weight(1f))
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(logs, key = { it.file.absolutePath }) { log ->
+                            LogFileCard(log)
+                        }
+                    }
+                }
+
+                SiteFooter()
             }
         }
-
-        // ── Hero section ─────────────────────────────────────────────────────
+    } else {
+        // ── Portrait: original stacked layout ────────────────────────────────
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.radialGradient(
-                        0.0f  to Color(0xFF091220),
-                        0.55f to Color(0xFF060C18),
-                        1.0f  to DocDeep,
-                        center = Offset.Unspecified,
-                        radius = 900f
-                    )
-                )
-                .padding(top = 12.dp, bottom = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
+                .background(DocDeep)
         ) {
-
-            // Logo
-            BrandLogo()
-
-            Spacer(Modifier.height(26.dp))
-
-            // ── Ready To Sync indicator ──────────────────────────────────────
-            ReadyToSyncBadge(serverReachable)
-
-            // ── Connection error detail + Retry button ───────────────────────
-            if (serverReachable == false) {
-                Spacer(Modifier.height(8.dp))
-
-                connectionError?.let { error ->
-                    Text(
-                        text = error,
-                        color = DocRed.copy(alpha = 0.75f),
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth(0.82f)
-                            .padding(bottom = 8.dp),
-                        maxLines = 3
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = { viewModel.checkServerHealth() },
-                    modifier = Modifier
-                        .fillMaxWidth(0.60f)
-                        .height(40.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.5.dp, DocOrange.copy(alpha = 0.7f))
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = DocOrange
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "RETRY CONNECTION",
-                        color = DocOrange,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(26.dp))
-
-            // ── SYNC ALL ─────────────────────────────────────────────────────
-            Button(
-                onClick = { viewModel.uploadAll() },
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth(0.82f)
-                    .height(52.dp),
-                enabled = hasPending && serverReachable == true && !isUploading,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DocCyan,
-                    disabledContainerColor = DocSurface
-                )
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isUploading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = DocDeep,
-                        strokeWidth = 2.5.dp
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "SYNCING…",
-                        color = DocDeep,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp,
-                        fontSize = 15.sp
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.CloudUpload,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = DocDeep
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "SYNC ALL",
-                        color = DocDeep,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp,
-                        fontSize = 15.sp
-                    )
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = DocMuted)
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            HeroContent(
+                serverReachable   = serverReachable,
+                connectionError   = connectionError,
+                hasPending        = hasPending,
+                hasErrors         = hasErrors,
+                hasSynced         = hasSynced,
+                isUploading       = isUploading,
+                logs              = logs,
+                onRetryConnection = { viewModel.checkServerHealth() },
+                onUploadAll       = { viewModel.uploadAll() },
+                onScanLogs        = { viewModel.scanLogs() },
+                onRetryFailed     = { viewModel.retryFailed() },
+                onDeleteSynced    = { showDeleteDialog = true }
+            )
 
-            // ── SCAN ─────────────────────────────────────────────────────────
+            StatusBar(statusMessage)
+            HorizontalDivider(color = DocDivider, thickness = 1.dp)
+
+            if (logs.isEmpty()) {
+                EmptyState(modifier = Modifier.weight(1f))
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(logs, key = { it.file.absolutePath }) { log ->
+                        LogFileCard(log)
+                    }
+                }
+            }
+
+            SiteFooter()
+        }
+    }
+}
+
+// ── Hero section content (shared between portrait and landscape) ──────────────
+@Composable
+private fun HeroContent(
+    serverReachable: Boolean?,
+    connectionError: String?,
+    hasPending: Boolean,
+    hasErrors: Boolean,
+    hasSynced: Boolean,
+    isUploading: Boolean,
+    logs: List<FlightLog>,
+    onRetryConnection: () -> Unit,
+    onUploadAll: () -> Unit,
+    onScanLogs: () -> Unit,
+    onRetryFailed: () -> Unit,
+    onDeleteSynced: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.radialGradient(
+                    0.0f  to Color(0xFF091220),
+                    0.55f to Color(0xFF060C18),
+                    1.0f  to DocDeep,
+                    center = Offset.Unspecified,
+                    radius = 900f
+                )
+            )
+            .padding(top = 12.dp, bottom = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        BrandLogo()
+
+        Spacer(Modifier.height(26.dp))
+
+        ReadyToSyncBadge(serverReachable)
+
+        if (serverReachable == false) {
+            Spacer(Modifier.height(8.dp))
+
+            connectionError?.let { error ->
+                Text(
+                    text = error,
+                    color = DocRed.copy(alpha = 0.75f),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth(0.82f)
+                        .padding(bottom = 8.dp),
+                    maxLines = 3
+                )
+            }
+
             OutlinedButton(
-                onClick = { viewModel.scanLogs() },
+                onClick = onRetryConnection,
                 modifier = Modifier
-                    .fillMaxWidth(0.82f)
-                    .height(46.dp),
-                enabled = !isUploading,
+                    .fillMaxWidth(0.60f)
+                    .height(40.dp),
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.5.dp, DocCyan.copy(alpha = 0.6f))
+                border = BorderStroke(1.5.dp, DocOrange.copy(alpha = 0.7f))
             ) {
                 Icon(
-                    Icons.Default.Search,
+                    Icons.Default.Refresh,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = DocCyan
+                    modifier = Modifier.size(16.dp),
+                    tint = DocOrange
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "SCAN FOR LOGS",
-                    color = DocCyan,
+                    "RETRY CONNECTION",
+                    color = DocOrange,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(26.dp))
+
+        Button(
+            onClick = onUploadAll,
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .height(52.dp),
+            enabled = hasPending && serverReachable == true && !isUploading,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = DocCyan,
+                disabledContainerColor = DocSurface
+            )
+        ) {
+            if (isUploading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = DocDeep,
+                    strokeWidth = 2.5.dp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "SYNCING…",
+                    color = DocDeep,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    fontSize = 15.sp
+                )
+            } else {
+                Icon(
+                    Icons.Default.CloudUpload,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = DocDeep
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "SYNC ALL",
+                    color = DocDeep,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    fontSize = 15.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        OutlinedButton(
+            onClick = onScanLogs,
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .height(46.dp),
+            enabled = !isUploading,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.5.dp, DocCyan.copy(alpha = 0.6f))
+        ) {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = DocCyan
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "SCAN FOR LOGS",
+                color = DocCyan,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.sp,
+                fontSize = 14.sp
+            )
+        }
+
+        if (hasErrors && !isUploading) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onRetryFailed,
+                modifier = Modifier
+                    .fillMaxWidth(0.82f)
+                    .height(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.5.dp, DocAmber.copy(alpha = 0.6f))
+            ) {
+                Icon(
+                    Icons.Default.Replay,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = DocAmber
+                )
+                Spacer(Modifier.width(8.dp))
+                val errorCount = logs.count { it.uploadStatus == UploadStatus.ERROR }
+                Text(
+                    "RETRY $errorCount FAILED",
+                    color = DocAmber,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.sp,
+                    letterSpacing = 0.8.sp,
                     fontSize = 14.sp
                 )
             }
-
-            // ── Retry failed uploads ─────────────────────────────────────────
-            if (hasErrors && !isUploading) {
-                Spacer(Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = { viewModel.retryFailed() },
-                    modifier = Modifier
-                        .fillMaxWidth(0.82f)
-                        .height(46.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.5.dp, DocAmber.copy(alpha = 0.6f))
-                ) {
-                    Icon(
-                        Icons.Default.Replay,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = DocAmber
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    val errorCount = logs.count { it.uploadStatus == UploadStatus.ERROR }
-                    Text(
-                        "RETRY $errorCount FAILED",
-                        color = DocAmber,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.8.sp,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            // ── Delete synced (conditional) ──────────────────────────────────
-            if (hasSynced) {
-                Spacer(Modifier.height(10.dp))
-                Button(
-                    onClick = { showDeleteDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth(0.82f)
-                        .height(46.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DocRed.copy(alpha = 0.85f)
-                    )
-                ) {
-                    Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
-                    Text(
-                        "DELETE $count SYNCED FILE(S)",
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                        fontSize = 13.sp
-                    )
-                }
-            }
         }
 
-        // ── Status bar ────────────────────────────────────────────────────────
-        Surface(color = DocPanel) {
-            Text(
-                text = statusMessage,
-                color = DocMuted,
-                fontSize = 12.sp,
+        if (hasSynced) {
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onDeleteSynced,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                maxLines = 2
-            )
-        }
-
-        HorizontalDivider(color = DocDivider, thickness = 1.dp)
-
-        // ── Log list / empty state ────────────────────────────────────────────
-        if (logs.isEmpty()) {
-            EmptyState(modifier = Modifier.weight(1f))
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .fillMaxWidth(0.82f)
+                    .height(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DocRed.copy(alpha = 0.85f)
+                )
             ) {
-                items(logs, key = { it.file.absolutePath }) { log ->
-                    LogFileCard(log)
-                }
+                Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
+                Text(
+                    "DELETE $count SYNCED FILE(S)",
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                    fontSize = 13.sp
+                )
             }
         }
+    }
+}
 
-        // ── Footer — BarnardHQ link ─────────────────────────────────────────
-        HorizontalDivider(color = DocDivider, thickness = 1.dp)
-        val uriHandler = LocalUriHandler.current
-        Row(
+// ── Status bar ────────────────────────────────────────────────────────────────
+@Composable
+private fun StatusBar(statusMessage: String) {
+    Surface(color = DocPanel) {
+        Text(
+            text = statusMessage,
+            color = DocMuted,
+            fontSize = 12.sp,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(DocPanel)
-                .clickable { uriHandler.openUri("https://www.barnardhq.com") }
-                .padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Language,
-                contentDescription = null,
-                tint = DocCyan.copy(alpha = 0.6f),
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "www.barnardhq.com",
-                color = DocCyan.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-                letterSpacing = 0.5.sp
-            )
-        }
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            maxLines = 2
+        )
+    }
+}
+
+// ── Site footer ───────────────────────────────────────────────────────────────
+@Composable
+private fun SiteFooter() {
+    val uriHandler = LocalUriHandler.current
+    HorizontalDivider(color = DocDivider, thickness = 1.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(DocPanel)
+            .clickable { uriHandler.openUri("https://www.barnardhq.com") }
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.Language,
+            contentDescription = null,
+            tint = DocCyan.copy(alpha = 0.6f),
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "www.barnardhq.com",
+            color = DocCyan.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
@@ -391,7 +500,6 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
         null  -> "Checking…"
     }
 
-    // Pulse animation only runs while checking (null state)
     val dotScale = if (isChecking) {
         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
         val scale by infiniteTransition.animateFloat(
@@ -445,7 +553,6 @@ private fun BrandLogo() {
             contentScale = ContentScale.Fit
         )
     } else {
-        // Text fallback until barnard_hq_logo.png is added to res/drawable/
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Default.Flight,
