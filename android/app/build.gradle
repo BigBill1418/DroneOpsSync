@@ -1,32 +1,41 @@
+import org.gradle.api.provider.ValueSource
+import org.gradle.api.provider.ValueSourceParameters
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+// ── Configuration-cache-safe git commit count ─────────────────────────────────
+// ValueSource is serialised by Gradle and replayed from the config cache,
+// so it is safe to call .get() at configuration time.
+abstract class GitCommitCount implements ValueSource<Integer, ValueSourceParameters.None> {
+    @Override
+    Integer obtain() {
+        try {
+            def proc = ['git', 'rev-list', '--count', 'HEAD'].execute()
+            proc.waitFor()
+            proc.exitValue() == 0 ? proc.text.trim().toInteger() : 1
+        } catch (ignored) {
+            1
+        }
+    }
 }
 
 // Read human-readable version name from version.properties (single source of truth)
 def versionProps = new Properties()
 file("../version.properties").withInputStream { versionProps.load(it) }
 
-// Auto-compute versionCode from total git commit count so every build is uniquely numbered
-def getGitCommitCount = { ->
-    try {
-        def result = 'git rev-list --count HEAD'.execute([], rootDir)
-        result.waitFor()
-        result.exitValue() == 0 ? result.text.trim().toInteger() : 1
-    } catch (ignored) {
-        1
-    }
-}
-
 android {
     namespace 'com.droneopssync.app'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.droneopssync.app"
         minSdk 26
-        targetSdk 34
-        versionCode getGitCommitCount()
+        targetSdk 35
+        versionCode providers.of(GitCommitCount) {}.get()
         versionName versionProps['VERSION_NAME']
     }
 
@@ -38,45 +47,43 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
     }
 
     buildFeatures {
         compose true
         buildConfig true
     }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.5.11'
-    }
+    // composeOptions block removed — Kotlin 2.x Compose plugin manages the
+    // compiler version automatically via org.jetbrains.kotlin.plugin.compose
 }
 
 dependencies {
-    def composeBom = platform('androidx.compose:compose-bom:2023.10.01')
+    def composeBom = platform('androidx.compose:compose-bom:2024.12.01')
     implementation composeBom
 
-    implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2'
-    implementation 'androidx.activity:activity-compose:1.8.0'
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
+    implementation 'androidx.activity:activity-compose:1.9.3'
 
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
     implementation 'androidx.compose.material:material-icons-extended'
-    implementation 'androidx.navigation:navigation-compose:2.7.4'
+    implementation 'androidx.navigation:navigation-compose:2.8.5'
 
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
-    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation 'com.squareup.retrofit2:retrofit:2.11.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.11.0'
 
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 
     debugImplementation 'androidx.compose.ui:ui-tooling'
 }
