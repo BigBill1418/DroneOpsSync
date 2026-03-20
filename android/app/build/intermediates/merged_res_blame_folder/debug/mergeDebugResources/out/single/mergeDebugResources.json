@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.droneopssync.app-debug-4:/xml_network_security_config.xml.flat",
+        "source": "com.droneopssync.app-main-6:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "com.droneopssync.app-debug-4:/drawable_barnard_hq_logo.png.flat",
+        "source": "com.droneopssync.app-main-6:/drawable/barnard_hq_logo.png"
+    }
+]
