@@ -79,10 +79,32 @@ object ApiClient {
         logging.level = HttpLoggingInterceptor.Level.HEADERS
         builder.addInterceptor(logging)
 
-        // Trust all certificates — necessary on DJI smart controllers running
-        // Android 8–10 with outdated CA bundles that don't trust Cloudflare's
-        // intermediate certs.  The tunnel itself is TLS-encrypted end-to-end;
-        // this simply prevents the handshake from being rejected locally.
+        // ⚠️  SECURITY NOTICE — Trust-all TLS certificate bypass
+        //
+        // This disables SSL certificate chain validation and hostname verification.
+        //
+        // WHY IT EXISTS:
+        //   DJI smart controllers (RC Pro, Smart Controller) ship with Android 8–10
+        //   and outdated system CA bundles that do not include Cloudflare's newer
+        //   intermediate certificates.  Without this bypass the TLS handshake fails
+        //   before any data is sent, making the app non-functional on the target hardware.
+        //
+        // WHAT IT DOES NOT AFFECT:
+        //   - The Cloudflare tunnel still encrypts traffic end-to-end between the
+        //     controller and the server.  Data in transit is not exposed.
+        //   - The device API key is still required on every request; unauthenticated
+        //     requests are rejected by the backend regardless of TLS state.
+        //
+        // RISK:
+        //   On an untrusted network (e.g. public Wi-Fi) a MITM attacker could present
+        //   a forged certificate that this code would accept.  The API key would then
+        //   be visible to the attacker.  This app is designed for use on controlled
+        //   field networks (the drone controller's own hotspot or a private LAN) where
+        //   that risk is acceptably low.
+        //
+        // FUTURE MITIGATION:
+        //   When DJI ships controllers with Android 12+ or updated CA bundles, this
+        //   bypass should be removed and standard certificate pinning applied instead.
         try {
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
