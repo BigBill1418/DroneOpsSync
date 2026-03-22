@@ -142,13 +142,26 @@ class MainViewModel : ViewModel() {
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
 
-            val found = mutableListOf<FlightLog>()
+            val found         = mutableListOf<FlightLog>()
+            val missingPaths  = mutableListOf<String>()
+            val matchedPaths  = mutableListOf<String>()
+            val validExts     = setOf("txt", "log", "csv", "json", "dat")
+
             for (pathStr in paths) {
                 val dir = File(pathStr)
+                Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
-                    dir.listFiles { f ->
-                        f.isFile && f.extension.lowercase() in listOf("txt", "log", "csv", "json")
-                    }?.forEach { found.add(FlightLog(file = it)) }
+                    matchedPaths += pathStr
+                    // Walk all subdirectories — DJI organises records into date sub-folders
+                    dir.walkTopDown()
+                        .filter { f -> f.isFile && f.extension.lowercase() in validExts }
+                        .forEach {
+                            Log.d(TAG, "  found: ${it.absolutePath}")
+                            found.add(FlightLog(file = it))
+                        }
+                } else {
+                    missingPaths += pathStr
+                    Log.w(TAG, "scanLogs: path not found → $pathStr")
                 }
             }
 
@@ -156,9 +169,17 @@ class MainViewModel : ViewModel() {
             _logs.value = found
 
             _statusMessage.value = when {
-                found.isEmpty() -> "No log files found — check paths in Settings"
-                else -> "${found.size} log file(s) found across ${paths.size} path(s)"
+                paths.isEmpty() ->
+                    "No scan paths configured — add paths in Settings"
+                found.isEmpty() && matchedPaths.isEmpty() ->
+                    "None of the ${paths.size} configured path(s) exist on this device — check Settings"
+                found.isEmpty() ->
+                    "Directories found but no log files inside — DJI app may store logs elsewhere"
+                else ->
+                    "${found.size} log file(s) found" +
+                        if (missingPaths.isNotEmpty()) " (${missingPaths.size} path(s) missing)" else ""
             }
+            Log.d(TAG, "scanLogs done: found=${found.size} matched=${matchedPaths.size} missing=${missingPaths.size}")
         }
     }
 
