@@ -87,14 +87,12 @@ Files are **never deleted automatically** — explicit confirmation is always re
 
 Pre-configured in the app; additional paths can be added in Settings.
 
-| DJI App | Path | Works on |
-|---------|------|----------|
-| DJI Fly | `/storage/emulated/0/DJI/FlightRecord` | Android 11+ phones |
-| DJI Fly | `/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord` | DJI controllers (Android ≤10) |
-| DJI Pilot 2 | `/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord` | All |
-| DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` | DJI controllers (Android ≤10) |
-
-> **Android 11+ note:** Paths under `Android/data/<package>/` are blocked by the OS even with All Files Access granted. This is a deliberate Android security restriction. On Android 11+ phones, DJI Fly writes logs to the public `/storage/emulated/0/DJI/FlightRecord` path instead.
+| Controller / Device | DJI App | Path |
+|---------------------|---------|------|
+| RC Plus 2 (4TD), RC Plus (M30T) | DJI Pilot 2 | `/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord` |
+| RC Pro (M3P), RC 2 (M5P) | DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` |
+| Phone (DJI GO 5) | DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` |
+| Phone (DJI Fly) | DJI Fly | `/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord` |
 
 ---
 

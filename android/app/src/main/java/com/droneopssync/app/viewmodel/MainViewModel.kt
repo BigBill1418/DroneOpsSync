@@ -21,21 +21,18 @@ import java.net.UnknownHostException
 
 private const val TAG = "MainViewModel"
 
-// Default scan paths — covers DJI Fly, DJI Pilot 2, DJI GO 5.
-//
-// Android 11+ NOTE: paths under Android/data/<package>/ are blocked by the OS even
-// with MANAGE_EXTERNAL_STORAGE.  On Android 11+ phones DJI Fly writes to the public
-// /storage/emulated/0/DJI/FlightRecord path instead.  The Android/data paths are kept
-// for DJI smart controllers (Android 8–10) where the restriction does not apply.
+// Confirmed working scan paths for each controller/device:
+//   RC Plus 2 (4TD)  → DJI/com.dji.industry.pilot/FlightRecord
+//   RC Plus  (M30T)  → DJI/com.dji.industry.pilot/FlightRecord
+//   RC Pro   (M3P)   → Android/data/dji.go.v5/files/FlightRecord
+//   RC 2     (M5P)   → Android/data/dji.go.v5/files/FlightRecord
+//   Phone (DJI GO)   → Android/data/dji.go.v5/files/FlightRecord
+//   Phone (DJI Fly)  → Android/data/com.dji.fly/files/FlightRecord
+//                       (blocked on Android 11+ phones by OS — use ADB or manual copy)
 private val DEFAULT_PATHS = listOf(
-    // DJI Fly — public path (Android 11+ phones)
-    "/storage/emulated/0/DJI/FlightRecord",
-    // DJI Fly — private path (DJI smart controllers, Android ≤10 only)
-    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord",
-    // DJI Pilot 2
     "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord",
-    // DJI GO 5
-    "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord"
+    "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord",
+    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
 )
 
 private const val PREF_SERVER_URL = "server_url"

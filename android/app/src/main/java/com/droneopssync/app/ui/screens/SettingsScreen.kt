@@ -146,14 +146,9 @@ fun SettingsScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Flight Log Paths", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    "One path per line. Paths that don't exist are silently skipped.",
+                    "One path per line. Paths that don't exist on this device are silently skipped.",
                     color = DocMuted,
                     fontSize = 13.sp
-                )
-                Text(
-                    "Android 11+ phones: Android/data paths are blocked by the OS — DJI Fly writes to /storage/emulated/0/DJI/FlightRecord instead.",
-                    color = DocAmber,
-                    fontSize = 12.sp
                 )
                 OutlinedTextField(
                     value = logPaths,
