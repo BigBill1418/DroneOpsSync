@@ -186,8 +186,28 @@ class MainViewModel : ViewModel() {
                 val response = ApiClient.create(url).uploadFlights(key, parts)
                 val body = response.body()
 
+                Log.d(TAG, "Upload response: HTTP ${response.code()}")
+                if (body != null) {
+                    Log.d(TAG, "  imported=${body.imported} skipped=${body.skipped} errors=${body.errors}")
+                } else {
+                    Log.w(TAG, "  response body is null (raw: ${response.errorBody()?.string()?.take(500)})")
+                }
+
                 if (response.isSuccessful && body != null) {
-                    pending.forEach { setStatus(it, UploadStatus.SYNCED) }
+                    // Mark files based on what the server actually did
+                    if (body.errors.isNotEmpty() && body.imported == 0) {
+                        // Server couldn't parse any files
+                        pending.forEach { setStatus(it, UploadStatus.ERROR) }
+                    } else if (body.errors.isNotEmpty()) {
+                        // Partial success — some imported, some failed
+                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
+                    } else if (body.imported == 0 && body.skipped > 0) {
+                        // All files already on server
+                        pending.forEach { setStatus(it, UploadStatus.DUPLICATE) }
+                    } else {
+                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
+                    }
+
                     _statusMessage.value = buildString {
                         if (body.imported > 0) append("${body.imported} imported")
                         if (body.skipped > 0) {
@@ -197,8 +217,10 @@ class MainViewModel : ViewModel() {
                         if (body.errors.isNotEmpty()) {
                             if (isNotEmpty()) append(", ")
                             append("${body.errors.size} parse error(s)")
+                            // Show first error for diagnostics
+                            append(": ${body.errors.first().take(80)}")
                         }
-                        if (isEmpty()) append("Upload complete")
+                        if (isEmpty()) append("Upload sent but server reported 0 imported — check server logs")
                         val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
                         if (syncedCount > 0) append(" — tap Delete to clean up controller")
                     }
