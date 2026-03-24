@@ -438,7 +438,7 @@ private fun StatusBar(statusMessage: String) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            maxLines = 2
+            maxLines = 4
         )
     }
 }

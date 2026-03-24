@@ -278,7 +278,7 @@ class MainViewModel : ViewModel() {
                             if (isNotEmpty()) append(", ")
                             append("${body.errors.size} parse error(s)")
                             // Show first error for diagnostics
-                            append(": ${body.errors.first().take(80)}")
+                            append(": ${body.errors.first().take(200)}")
                         }
                         if (isEmpty()) append("Upload sent but server reported 0 imported — check server logs")
                         val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
