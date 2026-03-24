@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DroneDump — Flight Log Upload</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1c1f2b;
+      --border:   #2e3147;
+      --accent:   #4f8ef7;
+      --green:    #34d399;
+      --yellow:   #fbbf24;
+      --red:      #f87171;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+
+    h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: .02em; }
+    h1 span { color: var(--accent); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 16px;
+    }
+
+    label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .06em; }
+
+    input[type=text], input[type=password] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: .95rem;
+      padding: 9px 12px;
+      outline: none;
+    }
+    input[type=text]:focus, input[type=password]:focus { border-color: var(--accent); }
+
+    .row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 7px;
+      font-size: .9rem;
+      font-weight: 600;
+      padding: 10px 18px;
+      transition: opacity .15s;
+    }
+    button:disabled { opacity: .4; cursor: default; }
+    button:not(:disabled):hover { opacity: .85; }
+
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline  { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-green    { background: var(--green); color: #0f1117; }
+    .btn-red      { background: var(--red);   color: #0f1117; }
+
+    /* hidden native file inputs */
+    #fileInput, #folderInput { display: none; }
+
+    /* file queue */
+    #queue { margin-top: 14px; max-height: 340px; overflow-y: auto; }
+
+    .file-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .85rem;
+    }
+    .file-row:last-child { border-bottom: none; }
+
+    .file-name { flex: 1; word-break: break-all; }
+    .file-size { color: var(--muted); white-space: nowrap; font-size: .78rem; }
+    .file-status { font-size: .75rem; font-weight: 700; white-space: nowrap; }
+    .s-pending   { color: var(--muted); }
+    .s-uploading { color: var(--yellow); }
+    .s-done      { color: var(--green); }
+    .s-skip      { color: var(--muted); }
+    .s-error     { color: var(--red); }
+
+    .remove-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .remove-btn:hover { color: var(--red); }
+
+    /* progress bar */
+    #progressWrap { margin-top: 12px; display: none; }
+    #progressBar {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #progressFill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width .3s;
+    }
+    #progressLabel { font-size: .8rem; color: var(--muted); margin-top: 5px; }
+
+    /* status banner */
+    #status {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-size: .88rem;
+      display: none;
+    }
+    #status.ok   { background: #132d22; border: 1px solid var(--green); color: var(--green); }
+    #status.warn { background: #2d2110; border: 1px solid var(--yellow); color: var(--yellow); }
+    #status.err  { background: #2d1212; border: 1px solid var(--red);    color: var(--red); }
+
+    .count-badge {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 10px;
+      font-size: .72rem;
+      font-weight: 700;
+      padding: 1px 7px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Drone<span>Dump</span> — Flight Log Upload</h1>
+
+<!-- Settings -->
+<div class="card">
+  <div>
+    <label for="serverUrl">Server URL</label>
+    <input type="text" id="serverUrl" value="http://192.168.50.20:3080" placeholder="http://192.168.50.20:3080">
+  </div>
+  <div style="margin-top:12px">
+    <label for="apiKey">API Key</label>
+    <input type="password" id="apiKey" placeholder="Paste your device API key">
+  </div>
+</div>
+
+<!-- File selection -->
+<div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+    <span style="font-weight:600;">
+      Files queued
+      <span class="count-badge" id="queueCount">0</span>
+    </span>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn-outline" onclick="document.getElementById('fileInput').click()">+ Add Files</button>
+      <button class="btn-outline" onclick="document.getElementById('folderInput').click()">+ Add Folder</button>
+      <button class="btn-outline btn-red" id="clearBtn" onclick="clearQueue()" disabled>Clear</button>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" multiple
+         accept=".csv,.dat,.log,.txt,.json">
+  <input type="file" id="folderInput" multiple
+         webkitdirectory mozdirectory>
+
+  <div id="queue"><p style="color:var(--muted); font-size:.85rem; margin-top:12px;">No files selected yet.</p></div>
+
+  <div id="progressWrap">
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="progressLabel"></div>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="row">
+    <button class="btn-green" id="uploadBtn" onclick="uploadAll()" disabled>Upload All</button>
+    <button class="btn-outline" id="retryBtn" onclick="retryErrors()" disabled style="display:none;">Retry Errors</button>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  // Each entry: { file, id, status: 'pending'|'uploading'|'done'|'skip'|'error', note }
+  let queue = [];
+  let nextId = 0;
+
+  const VALID_EXTS = new Set(['csv','dat','log','txt','json']);
+
+  // ── File input wiring ──────────────────────────────────────────────────────
+  document.getElementById('fileInput').addEventListener('change', e => {
+    addFiles([...e.target.files]);
+    e.target.value = '';
+  });
+  document.getElementById('folderInput').addEventListener('change', e => {
+    // Filter to known flight-log extensions only
+    const files = [...e.target.files].filter(f => {
+      const ext = f.name.split('.').pop().toLowerCase();
+      return VALID_EXTS.has(ext);
+    });
+    addFiles(files);
+    e.target.value = '';
+  });
+
+  function addFiles(files) {
+    let added = 0;
+    for (const f of files) {
+      // Skip duplicates (same name + size)
+      const dup = queue.find(q => q.file.name === f.name && q.file.size === f.size);
+      if (dup) continue;
+      queue.push({ file: f, id: nextId++, status: 'pending', note: '' });
+      added++;
+    }
+    renderQueue();
+    if (added === 0) showStatus('warn', 'No new files added (all already in queue or wrong extension).');
+  }
+
+  // ── Queue rendering ────────────────────────────────────────────────────────
+  function renderQueue() {
+    const el = document.getElementById('queue');
+    document.getElementById('queueCount').textContent = queue.length;
+    document.getElementById('uploadBtn').disabled = queue.length === 0 || uploading();
+    document.getElementById('clearBtn').disabled  = queue.length === 0 || uploading();
+
+    const hasErrors = queue.some(q => q.status === 'error');
+    const retryBtn = document.getElementById('retryBtn');
+    retryBtn.style.display = hasErrors ? '' : 'none';
+    retryBtn.disabled = uploading();
+
+    if (queue.length === 0) {
+      el.innerHTML = '<p style="color:var(--muted); font-size:.85rem; margin-top:12px;">No files selected yet.</p>';
+      return;
+    }
+
+    el.innerHTML = queue.map(q => `
+      <div class="file-row" id="row-${q.id}">
+        ${q.status === 'pending'
+          ? `<button class="remove-btn" onclick="removeFile(${q.id})" title="Remove">&times;</button>`
+          : '<span style="width:20px"></span>'}
+        <span class="file-name">${escHtml(q.file.webkitRelativePath || q.file.name)}</span>
+        <span class="file-size">${fmtSize(q.file.size)}</span>
+        <span class="file-status s-${q.status}">${statusLabel(q)}</span>
+      </div>
+    `).join('');
+  }
+
+  function statusLabel(q) {
+    switch (q.status) {
+      case 'pending':   return 'Pending';
+      case 'uploading': return 'Uploading…';
+      case 'done':      return q.note || 'Uploaded';
+      case 'skip':      return 'Already on server';
+      case 'error':     return 'Error' + (q.note ? ': ' + q.note.slice(0, 60) : '');
+    }
+  }
+
+  function removeFile(id) {
+    queue = queue.filter(q => q.id !== id);
+    renderQueue();
+  }
+
+  function clearQueue() {
+    if (uploading()) return;
+    queue = [];
+    renderQueue();
+    hideStatus();
+  }
+
+  function retryErrors() {
+    queue.forEach(q => { if (q.status === 'error') { q.status = 'pending'; q.note = ''; } });
+    renderQueue();
+  }
+
+  // ── Upload ─────────────────────────────────────────────────────────────────
+  let _uploading = false;
+  function uploading() { return _uploading; }
+
+  async function uploadAll() {
+    const serverUrl = document.getElementById('serverUrl').value.trim();
+    const apiKey    = document.getElementById('apiKey').value.trim();
+
+    if (!serverUrl.startsWith('http')) {
+      showStatus('err', 'Server URL must start with http:// or https://');
+      return;
+    }
+    if (!apiKey) {
+      showStatus('err', 'API key is required.');
+      return;
+    }
+
+    const pending = queue.filter(q => q.status === 'pending');
+    if (pending.length === 0) { showStatus('warn', 'Nothing to upload.'); return; }
+
+    _uploading = true;
+    pending.forEach(q => { q.status = 'uploading'; });
+    renderQueue();
+    showProgress(0, `Uploading ${pending.length} file(s)…`);
+
+    const form = new FormData();
+    for (const q of pending) form.append('files', q.file, q.file.name);
+
+    try {
+      const res = await fetch(`${serverUrl}/api/flight-library/device-upload`, {
+        method: 'POST',
+        headers: { 'X-Device-Api-Key': apiKey },
+        body: form
+      });
+
+      if (!res.ok) {
+        const msg = res.status === 401 || res.status === 403
+          ? 'Invalid API key — check Settings'
+          : res.status === 404
+            ? 'Upload endpoint not found — check server URL'
+            : `Server returned HTTP ${res.status}`;
+        pending.forEach(q => { q.status = 'error'; q.note = msg; });
+        showStatus('err', msg);
+        return;
+      }
+
+      const body = await res.json();
+      const { imported = 0, skipped = 0, errors = [] } = body;
+
+      // Assign statuses per-file from server response
+      // Server returns errors as strings; if count matches we can map them
+      pending.forEach((q, i) => {
+        if (skipped > 0 && imported === 0 && errors.length === 0) {
+          q.status = 'skip';
+        } else if (errors.length > 0 && imported === 0) {
+          q.status = 'error';
+          q.note   = errors[0] || 'Parse error';
+        } else {
+          q.status = 'done';
+        }
+      });
+
+      const parts = [];
+      if (imported > 0)  parts.push(`${imported} imported`);
+      if (skipped  > 0)  parts.push(`${skipped} already on server`);
+      if (errors.length) parts.push(`${errors.length} parse error(s): ${errors[0]?.slice(0,80)}`);
+      const summary = parts.join(' · ') || 'Upload sent but server reported 0 imported';
+
+      showStatus(errors.length && !imported ? 'err' : imported ? 'ok' : 'warn', summary);
+      showProgress(100, summary);
+
+    } catch (err) {
+      const msg = err.name === 'TypeError'
+        ? 'Could not reach server — check URL and network'
+        : err.message;
+      pending.forEach(q => { q.status = 'error'; q.note = msg; });
+      showStatus('err', msg);
+    } finally {
+      _uploading = false;
+      renderQueue();
+      hideProgress();
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function showProgress(pct, label) {
+    document.getElementById('progressWrap').style.display = '';
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = label;
+  }
+  function hideProgress() { document.getElementById('progressWrap').style.display = 'none'; }
+
+  function showStatus(type, msg) {
+    const el = document.getElementById('status');
+    el.className = type;
+    el.textContent = msg;
+    el.style.display = '';
+  }
+  function hideStatus() { document.getElementById('status').style.display = 'none'; }
+
+  function fmtSize(b) {
+    if (b < 1024)       return b + ' B';
+    if (b < 1048576)    return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(1) + ' MB';
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>

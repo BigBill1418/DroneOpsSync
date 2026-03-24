@@ -1,5 +1,6 @@
 # DroneOpsSync
-Android companion app for **DroneOpsCommand** — syncs DJI flight logs from smart controllers directly into the DroneOpsCommand Flight Management System via Cloudflare tunnel.
+
+Android companion app for **DroneOpsCommand** — syncs DJI flight logs from smart controllers directly into the DroneOpsCommand Flight Management System.
 
 Part of the DroneOps platform. No separate server required — DroneOpsCommand IS the backend.
 
@@ -7,27 +8,47 @@ Part of the DroneOps platform. No separate server required — DroneOpsCommand I
 
 ## Overview
 
-DroneOpsSync runs on your DJI smart controller (sideloaded APK). It scans the controller's local storage for flight log files and uploads them in a single batch to your DroneOpsCommand instance, reachable from anywhere over the internet via Cloudflare tunnel. Once confirmed on the server, logs can be deleted from the controller with a single tap.
+DroneOpsSync runs on your DJI smart controller (sideloaded APK). It scans the controller's local storage for flight log files and uploads them in a single batch to your DroneOpsCommand instance over plain HTTP — either directly on your local network, or remotely via WireGuard VPN. Once confirmed on the server, logs can be deleted from the controller with a single tap.
 
 ---
 
 ## Prerequisites
 
 1. **DroneOpsCommand** deployed and running (see [DroneOpsCommand](https://github.com/BigBill1418/DroneOpsCommand))
-2. **Cloudflare tunnel** configured in DroneOpsCommand (the `cloudflared` service is included in the docker-compose stack — add your `CLOUDFLARE_TUNNEL_TOKEN`)
-3. **Device API key** generated in DroneOpsCommand → Settings → Device Access
+2. **Device API key** generated in DroneOpsCommand → Settings → Device Access
+3. **Network access** to the server — LAN (direct IP) or WireGuard VPN for remote
+
+---
+
+## Network Setup
+
+### On the same LAN (most common)
+
+The controller connects directly to the server's local IP over HTTP. No tunnel, no TLS, no extra config. Just make sure both devices are on the same network and the server port is reachable.
+
+```
+DJI Controller → http://192.168.1.50:8080
+```
+
+### Remote access via WireGuard
+
+Connect the controller to your WireGuard VPN before uploading. The app then talks to the server's VPN IP exactly like LAN — plain HTTP, no certificate issues.
+
+```
+DJI Controller → WireGuard VPN → http://10.8.0.1:8080
+```
+
+WireGuard has an official Android APK that runs on Android 8+, compatible with all DJI smart controllers.
 
 ---
 
 ## Setup
 
-### Step 1 — DroneOpsCommand: Generate a Device API Key
+### Step 1 — Generate a Device API Key
 
 In your DroneOpsCommand web UI:
 1. Go to **Settings → Device Access**
-2. A `Device API Key` is auto-generated. Copy it.
-
-This key authenticates the Android app without requiring a user login. Keep it safe.
+2. Copy the auto-generated `Device API Key`
 
 ### Step 2 — Build & Sideload the APK
 
@@ -45,7 +66,7 @@ Open DroneOpsSync on the controller, tap the **Settings** (gear) icon, and enter
 
 | Field | Value |
 |-------|-------|
-| DroneOpsCommand URL | Your Cloudflare tunnel URL (e.g. `https://ops.yourdomain.com`) or local IP |
+| DroneOpsCommand URL | Local IP (e.g. `http://192.168.1.50:8080`) or WireGuard VPN IP |
 | Device API Key | The key copied from DroneOpsCommand Settings |
 
 Tap **Save**. The status indicator will turn green when the server is reachable.
@@ -66,11 +87,12 @@ Files are **never deleted automatically** — explicit confirmation is always re
 
 Pre-configured in the app; additional paths can be added in Settings.
 
-| DJI App | Path |
-|---------|------|
-| DJI Pilot 2 | `/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord` |
-| DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` |
-| DJI Fly | `/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord` |
+| Controller / Device | DJI App | Path |
+|---------------------|---------|------|
+| RC Plus 2 (4TD), RC Plus (M30T) | DJI Pilot 2 | `/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord` |
+| RC Pro (M3P), RC 2 (M5P) | DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` |
+| Phone (DJI GO 5) | DJI GO 5 | `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord` |
+| Phone (DJI Fly) | DJI Fly | `/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord` |
 
 ---
 
@@ -89,15 +111,11 @@ Pre-configured in the app; additional paths can be added in Settings.
 
 ## Backend Integration
 
-DroneOpsSync talks directly to DroneOpsCommand's `/api/flight-library/device-upload` endpoint.
-This endpoint is part of DroneOpsCommand — there is no separate middleware or relay server.
+DroneOpsSync talks directly to DroneOpsCommand's `/api/flight-library/device-upload` endpoint over plain HTTP. There is no middleware, relay server, or tunnel required.
 
-The DroneOpsCommand stack already includes:
+The DroneOpsCommand stack includes:
 - **`flight-parser`** — Rust service that parses DJI `.txt` log format
-- **`cloudflared`** — Cloudflare tunnel for secure internet access
 - **PostgreSQL** — persistent flight record storage
-
-All backend resources are self-contained within DroneOpsCommand.
 
 ---
 
@@ -107,7 +125,7 @@ Place your logo PNG at:
 ```
 android/app/src/main/res/drawable/droneops_sync_logo.png
 ```
-Recommended size: 1024 × 410 px on a transparent background. The app will automatically use it; the text fallback renders until the file is present.
+Recommended size: 1024 × 410 px on a transparent background.
 
 ---
 

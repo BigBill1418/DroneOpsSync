@@ -1,0 +1,30 @@
+name: Auto-merge claude/dev → main
+
+on:
+  push:
+    branches:
+      - claude/dev
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge claude/dev into main
+        run: |
+          git checkout main
+          git merge --no-ff origin/claude/dev \
+            -m "chore: auto-merge claude/dev into main [skip ci]"
+          git push origin main
