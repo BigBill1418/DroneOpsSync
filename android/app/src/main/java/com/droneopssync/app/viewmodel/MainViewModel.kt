@@ -21,18 +21,15 @@ import java.net.UnknownHostException
 
 private const val TAG = "MainViewModel"
 
-// Confirmed working scan paths for each controller/device:
-//   RC Plus 2 (4TD)  → DJI/com.dji.industry.pilot/FlightRecord
-//   RC Plus  (M30T)  → DJI/com.dji.industry.pilot/FlightRecord
-//   RC Pro   (M3P)   → Android/data/dji.go.v5/files/FlightRecord
-//   RC 2     (M5P)   → Android/data/dji.go.v5/files/FlightRecord
-//   Phone (DJI GO)   → Android/data/dji.go.v5/files/FlightRecord
-//   Phone (DJI Fly)  → Android/data/com.dji.fly/files/FlightRecord
-//                       (blocked on Android 11+ phones by OS — use ADB or manual copy)
+// Scan paths for each controller/device in this fleet:
+//   DJI RC 2          → Android/data/dji.go.v5/files/FlightRecord
+//   DJI RC Pro        → Android/data/dji.go.v5/files/FlightRecord
+//   Bill's S25 Ultra  → Android/data/dji.go.v5/files/FlightRecord
+//   DJI RC Plus       → DJI/com.dji.industry.pilot/FlightRecord
+//   DJI RC Plus 2     → DJI/com.dji.industry.pilot/FlightRecord
 private val DEFAULT_PATHS = listOf(
-    "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord",
     "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord",
-    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
+    "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord"
 )
 
 private const val PREF_SERVER_URL = "server_url"
@@ -145,7 +142,7 @@ class MainViewModel : ViewModel() {
             val found         = mutableListOf<FlightLog>()
             val missingPaths  = mutableListOf<String>()
             val matchedPaths  = mutableListOf<String>()
-            val validExts     = setOf("txt", "log", "csv", "json", "dat")
+            val validExts     = setOf("txt") // DJI flight records are .txt only
 
             for (pathStr in paths) {
                 val dir = File(pathStr)
