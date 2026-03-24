@@ -55,6 +55,13 @@ android {
         jvmTarget = '17'
     }
 
+    // Explicitly pin the Kotlin toolchain to JDK 17 (any vendor).
+    // Without this, AGP 8.7+ silently requests JetBrains JDK 21 for the
+    // Kotlin daemon, which has no download URL on Windows CLI builds.
+    kotlin {
+        jvmToolchain(17)
+    }
+
     buildFeatures {
         compose true
         buildConfig true
