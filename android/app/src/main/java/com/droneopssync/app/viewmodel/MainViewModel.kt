@@ -271,7 +271,11 @@ class MainViewModel : ViewModel() {
             try {
                 val parts = pending.map { log ->
                     val body = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
-                    MultipartBody.Part.createFormData("files", log.file.name, body)
+                    // Strip characters that break multipart/form-data parsers in the
+                    // Content-Disposition filename param (e.g. "[", "]" in DJI names).
+                    val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
+                    diag(DiagLevel.INFO, "UPLOAD", "part: ${log.file.name} → filename=\"$safeName\"")
+                    MultipartBody.Part.createFormData("files", safeName, body)
                 }
 
                 val response = ApiClient.create(url).uploadFlights(key, parts)
