@@ -30,10 +30,12 @@ private const val TAG = "MainViewModel"
 //   DJI RC Plus       → DJI/com.dji.industry.pilot/FlightRecord
 //   DJI RC Plus 2     → DJI/com.dji.industry.pilot/FlightRecord
 //   Phones (DJI Fly)  → Android/data/com.dji.fly/files/FlightRecord
+//   DJI Smart Controller / Mavic 3 Pro (GO 4 era) → DJI/dji.go.v4/FlightRecord
 private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord",
     "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord",
-    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord"
+    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord",
+    "/storage/emulated/0/DJI/dji.go.v4/FlightRecord"
 )
 
 private const val PREF_SERVER_URL   = "server_url"
@@ -44,7 +46,7 @@ private const val DEFAULT_SERVER    = "http://192.168.50.20:3080"
 
 // Bump this whenever DEFAULT_PATHS changes — forces a one-time reset of
 // any previously saved paths so users always get the correct fleet paths.
-private const val PATHS_VERSION = 3
+private const val PATHS_VERSION = 4
 
 class MainViewModel : ViewModel() {
 
