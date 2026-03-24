@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.droneopssync.app.api.ApiClient
+import com.droneopssync.app.model.DiagLevel
+import com.droneopssync.app.model.DiagLog
 import com.droneopssync.app.model.FlightLog
 import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +48,22 @@ private const val PATHS_VERSION = 3
 
 class MainViewModel : ViewModel() {
 
+    // ── Diagnostic log buffer ─────────────────────────────────────────────────
+    private val _diagLogs = MutableStateFlow<List<DiagLog>>(emptyList())
+    val diagLogs: StateFlow<List<DiagLog>> = _diagLogs
+
+    private fun diag(level: DiagLevel, tag: String, message: String) {
+        val entry = DiagLog(level = level, tag = tag, message = message)
+        Log.println(
+            when (level) { DiagLevel.ERROR -> Log.ERROR; DiagLevel.WARN -> Log.WARN; else -> Log.DEBUG },
+            TAG, "[$tag] $message"
+        )
+        _diagLogs.value = (_diagLogs.value + entry).takeLast(500)
+    }
+
+    fun clearDiagLogs() { _diagLogs.value = emptyList() }
+
+    // ── Flight logs ───────────────────────────────────────────────────────────
     private val _logs = MutableStateFlow<List<FlightLog>>(emptyList())
     val logs: StateFlow<List<FlightLog>> = _logs
 
@@ -123,31 +141,42 @@ class MainViewModel : ViewModel() {
             if (url.isBlank()) {
                 _serverReachable.value = false
                 _connectionError.value = "No server URL configured — open Settings"
+                diag(DiagLevel.WARN, "HEALTH", "No server URL configured")
                 return@launch
             }
             if (!url.isValidUrl()) {
                 _serverReachable.value = false
                 _connectionError.value = "URL must start with http:// or https://"
                 _statusMessage.value = "Invalid URL — must start with http:// or https://"
+                diag(DiagLevel.WARN, "HEALTH", "Invalid URL: $url")
                 return@launch
             }
 
+            diag(DiagLevel.INFO, "HEALTH", "GET $url/health")
             try {
                 val response = ApiClient.create(url).health()
-                _serverReachable.value = response.code() < 500
-                if (response.code() >= 500) {
-                    _connectionError.value = "Server returned HTTP ${response.code()}"
+                val ok = response.code() < 500
+                _serverReachable.value = ok
+                if (!ok) {
+                    val err = "Server returned HTTP ${response.code()}"
+                    _connectionError.value = err
+                    diag(DiagLevel.ERROR, "HEALTH", err)
+                } else {
+                    diag(DiagLevel.INFO, "HEALTH", "HTTP ${response.code()} — server reachable")
                 }
             } catch (e: UnknownHostException) {
                 _serverReachable.value = false
                 _connectionError.value = "DNS lookup failed — check the URL"
+                diag(DiagLevel.ERROR, "HEALTH", "UnknownHostException: ${e.message}")
             } catch (e: SocketTimeoutException) {
                 _serverReachable.value = false
                 _connectionError.value = "Connection timed out — is the server running?"
+                diag(DiagLevel.ERROR, "HEALTH", "SocketTimeoutException: ${e.message}")
             } catch (e: IOException) {
                 Log.e(TAG, "Health check failed", e)
                 _serverReachable.value = false
                 _connectionError.value = "Network error: ${e.message?.take(120)}"
+                diag(DiagLevel.ERROR, "HEALTH", "IOException: ${e.message}")
             }
         }
     }
@@ -164,13 +193,11 @@ class MainViewModel : ViewModel() {
             // path → count of .txt files found in it
             val pathCounts   = mutableListOf<Pair<String, Int>>()
 
+            diag(DiagLevel.INFO, "SCAN", "Scanning ${paths.size} path(s)")
             for (pathStr in paths) {
                 val dir = File(pathStr)
                 Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
-                    // maxDepth=2: FlightRecord/ and one level of date-based sub-folders.
-                    // DJI never nests deeper than that, so this prevents accidental
-                    // recursive descent into unrelated directory trees.
                     val hits = dir.walkTopDown()
                         .maxDepth(2)
                         .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
@@ -180,10 +207,11 @@ class MainViewModel : ViewModel() {
                         found.add(FlightLog(file = it))
                     }
                     pathCounts += pathStr to hits.size
-                    Log.d(TAG, "  path $pathStr → ${hits.size} file(s)")
+                    diag(DiagLevel.INFO, "SCAN", "$pathStr → ${hits.size} file(s)")
+                    hits.forEach { diag(DiagLevel.INFO, "SCAN", "  ${it.name}  (${it.length()} B)") }
                 } else {
                     missingPaths += pathStr
-                    Log.w(TAG, "scanLogs: path not found → $pathStr")
+                    diag(DiagLevel.WARN, "SCAN", "Path not found: $pathStr")
                 }
             }
 
@@ -237,6 +265,9 @@ class MainViewModel : ViewModel() {
             _isUploading.value = true
             pending.forEach { setStatus(it, UploadStatus.UPLOADING) }
 
+            diag(DiagLevel.INFO, "UPLOAD", "Starting upload: ${pending.size} file(s) → $url")
+            pending.forEach { diag(DiagLevel.INFO, "UPLOAD", "  ${it.file.name}  (${it.sizeFormatted})") }
+
             try {
                 val parts = pending.map { log ->
                     val body = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
@@ -246,23 +277,24 @@ class MainViewModel : ViewModel() {
                 val response = ApiClient.create(url).uploadFlights(key, parts)
                 val body = response.body()
 
-                Log.d(TAG, "Upload response: HTTP ${response.code()}")
+                diag(DiagLevel.INFO, "UPLOAD", "HTTP ${response.code()}")
+
                 if (body != null) {
-                    Log.d(TAG, "  imported=${body.imported} skipped=${body.skipped} errors=${body.errors}")
+                    diag(DiagLevel.INFO, "UPLOAD", "imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
+                    body.errors.forEachIndexed { i, err ->
+                        diag(DiagLevel.ERROR, "UPLOAD", "error[$i]: $err")
+                    }
                 } else {
-                    Log.w(TAG, "  response body is null (raw: ${response.errorBody()?.string()?.take(500)})")
+                    val rawErr = response.errorBody()?.string()?.take(1000) ?: "(no body)"
+                    diag(DiagLevel.ERROR, "UPLOAD", "Response body null — raw error body: $rawErr")
                 }
 
                 if (response.isSuccessful && body != null) {
-                    // Mark files based on what the server actually did
                     if (body.errors.isNotEmpty() && body.imported == 0) {
-                        // Server couldn't parse any files
                         pending.forEach { setStatus(it, UploadStatus.ERROR) }
                     } else if (body.errors.isNotEmpty()) {
-                        // Partial success — some imported, some failed
                         pending.forEach { setStatus(it, UploadStatus.SYNCED) }
                     } else if (body.imported == 0 && body.skipped > 0) {
-                        // All files already on server
                         pending.forEach { setStatus(it, UploadStatus.DUPLICATE) }
                     } else {
                         pending.forEach { setStatus(it, UploadStatus.SYNCED) }
@@ -277,30 +309,35 @@ class MainViewModel : ViewModel() {
                         if (body.errors.isNotEmpty()) {
                             if (isNotEmpty()) append(", ")
                             append("${body.errors.size} parse error(s)")
-                            // Show first error for diagnostics
                             append(": ${body.errors.first().take(200)}")
                         }
-                        if (isEmpty()) append("Upload sent but server reported 0 imported — check server logs")
+                        if (isEmpty()) append("Upload sent but server reported 0 imported — check Diagnostics")
                         val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
                         if (syncedCount > 0) append(" — tap Delete to clean up controller")
                     }
                 } else {
-                    pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    _statusMessage.value = when (response.code()) {
+                    val rawErr = response.errorBody()?.string()?.take(1000) ?: "(no body)"
+                    val msg = when (response.code()) {
                         401, 403 -> "Invalid API key — check Settings"
                         404      -> "Upload endpoint not found — check server URL"
                         else     -> "Upload failed (HTTP ${response.code()})"
                     }
+                    diag(DiagLevel.ERROR, "UPLOAD", "Non-2xx response: $msg | raw: $rawErr")
+                    pending.forEach { setStatus(it, UploadStatus.ERROR) }
+                    _statusMessage.value = msg
                 }
             } catch (e: UnknownHostException) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "DNS lookup failed — check URL"
+                diag(DiagLevel.ERROR, "UPLOAD", "UnknownHostException: ${e.message}")
             } catch (e: SocketTimeoutException) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "Connection timed out — server may be down"
+                diag(DiagLevel.ERROR, "UPLOAD", "SocketTimeoutException: ${e.message}")
             } catch (e: Exception) {
                 pending.forEach { setStatus(it, UploadStatus.ERROR) }
                 _statusMessage.value = "Connection error: ${e.message?.take(100)}"
+                diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 _isUploading.value = false
             }

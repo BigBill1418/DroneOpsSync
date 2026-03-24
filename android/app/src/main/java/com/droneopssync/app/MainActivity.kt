@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.droneopssync.app.ui.screens.DiagScreen
 import com.droneopssync.app.ui.screens.HomeScreen
 import com.droneopssync.app.ui.screens.SettingsScreen
 import com.droneopssync.app.ui.screens.SplashScreen
@@ -58,13 +59,20 @@ class MainActivity : ComponentActivity() {
                     composable("home") {
                         HomeScreen(
                             viewModel = viewModel,
-                            onNavigateToSettings = { navController.navigate("settings") }
+                            onNavigateToSettings = { navController.navigate("settings") },
+                            onNavigateToDiag = { navController.navigate("diag") }
                         )
                     }
                     composable("settings") {
                         SettingsScreen(
                             viewModel = viewModel,
                             prefs = sharedPrefs,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("diag") {
+                        DiagScreen(
+                            viewModel = viewModel,
                             onBack = { navController.popBackStack() }
                         )
                     }
