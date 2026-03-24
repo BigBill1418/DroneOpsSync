@@ -200,8 +200,9 @@ fun SettingsScreen(
             }
 
             // ── Version footer ────────────────────────────────────────────────────
+            val versionName = BuildConfig.VERSION_NAME.takeIf { it.isNotBlank() } ?: "1.1.9"
             Text(
-                "DroneOpsSync  v${BuildConfig.VERSION_NAME}  ·  Build ${BuildConfig.VERSION_CODE}",
+                "DroneOpsSync  v$versionName  ·  Build ${BuildConfig.VERSION_CODE}",
                 color = DocMuted,
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,

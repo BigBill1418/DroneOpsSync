@@ -157,23 +157,28 @@ class MainViewModel : ViewModel() {
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
 
-            val found         = mutableListOf<FlightLog>()
-            val missingPaths  = mutableListOf<String>()
-            val matchedPaths  = mutableListOf<String>()
-            val validExts     = setOf("txt") // DJI flight records are .txt only
+            val found        = mutableListOf<FlightLog>()
+            val missingPaths = mutableListOf<String>()
+            // path → count of .txt files found in it
+            val pathCounts   = mutableListOf<Pair<String, Int>>()
 
             for (pathStr in paths) {
                 val dir = File(pathStr)
                 Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
-                    matchedPaths += pathStr
-                    // Walk all subdirectories — DJI organises records into date sub-folders
-                    dir.walkTopDown()
-                        .filter { f -> f.isFile && f.extension.lowercase() in validExts }
-                        .forEach {
-                            Log.d(TAG, "  found: ${it.absolutePath}")
-                            found.add(FlightLog(file = it))
-                        }
+                    // maxDepth=2: FlightRecord/ and one level of date-based sub-folders.
+                    // DJI never nests deeper than that, so this prevents accidental
+                    // recursive descent into unrelated directory trees.
+                    val hits = dir.walkTopDown()
+                        .maxDepth(2)
+                        .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
+                        .toList()
+                    hits.forEach {
+                        Log.d(TAG, "  found: ${it.absolutePath}")
+                        found.add(FlightLog(file = it))
+                    }
+                    pathCounts += pathStr to hits.size
+                    Log.d(TAG, "  path $pathStr → ${hits.size} file(s)")
                 } else {
                     missingPaths += pathStr
                     Log.w(TAG, "scanLogs: path not found → $pathStr")
@@ -183,16 +188,26 @@ class MainViewModel : ViewModel() {
             found.sortByDescending { it.file.lastModified() }
             _logs.value = found
 
+            val matchedPaths = pathCounts.filter { it.second >= 0 }
             _statusMessage.value = when {
                 paths.isEmpty() ->
                     "No scan paths configured — add paths in Settings"
-                found.isEmpty() && matchedPaths.isEmpty() ->
+                matchedPaths.isEmpty() ->
                     "None of the ${paths.size} configured path(s) exist on this device — check Settings"
                 found.isEmpty() ->
-                    "Directories found but no log files inside — DJI app may store logs elsewhere"
-                else ->
-                    "${found.size} log file(s) found" +
-                        if (missingPaths.isNotEmpty()) " (${missingPaths.size} path(s) missing)" else ""
+                    "Directories found but no .txt log files inside — DJI app may store logs elsewhere"
+                else -> {
+                    // Show a breakdown so the user can see exactly where files come from
+                    val breakdown = pathCounts.filter { it.second > 0 }
+                        .joinToString("  |  ") { (p, n) ->
+                            val label = p.substringAfterLast("/").substringAfterLast("\\")
+                            val parent = p.substringBeforeLast("/").substringAfterLast("/")
+                            "$n × $parent/$label"
+                        }
+                    "${found.size} log(s) found" +
+                        (if (missingPaths.isNotEmpty()) " · ${missingPaths.size} path(s) missing" else "") +
+                        "\n$breakdown"
+                }
             }
             Log.d(TAG, "scanLogs done: found=${found.size} matched=${matchedPaths.size} missing=${missingPaths.size}")
         }
