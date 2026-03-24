@@ -325,6 +325,8 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun defaultPathsText(): String = DEFAULT_PATHS.joinToString("\n")
+
     private fun String.isValidUrl(): Boolean =
         startsWith("http://") || startsWith("https://")
 }
