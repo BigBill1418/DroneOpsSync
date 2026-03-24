@@ -268,82 +268,99 @@ class MainViewModel : ViewModel() {
             diag(DiagLevel.INFO, "UPLOAD", "Starting upload: ${pending.size} file(s) → $url")
             pending.forEach { diag(DiagLevel.INFO, "UPLOAD", "  ${it.file.name}  (${it.sizeFormatted})") }
 
+            var totalImported = 0
+            var totalSkipped  = 0
+            var totalErrors   = 0
+            // Set true on auth failure or network error so remaining files are
+            // marked ERROR immediately rather than attempting doomed requests.
+            var aborted = false
+
             try {
-                val parts = pending.map { log ->
-                    val body = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
-                    // Strip characters that break multipart/form-data parsers in the
-                    // Content-Disposition filename param (e.g. "[", "]" in DJI names).
-                    val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
-                    diag(DiagLevel.INFO, "UPLOAD", "part: ${log.file.name} → filename=\"$safeName\"")
-                    MultipartBody.Part.createFormData("files", safeName, body)
-                }
-
-                val response = ApiClient.create(url).uploadFlights(key, parts)
-                val body = response.body()
-
-                diag(DiagLevel.INFO, "UPLOAD", "HTTP ${response.code()}")
-
-                if (body != null) {
-                    diag(DiagLevel.INFO, "UPLOAD", "imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
-                    body.errors.forEachIndexed { i, err ->
-                        diag(DiagLevel.ERROR, "UPLOAD", "error[$i]: $err")
+                for (log in pending) {
+                    if (aborted) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        continue
                     }
-                } else {
-                    val rawErr = response.errorBody()?.string()?.take(1000) ?: "(no body)"
-                    diag(DiagLevel.ERROR, "UPLOAD", "Response body null — raw error body: $rawErr")
-                }
+                    try {
+                        // Strip characters that break multipart/form-data parsers in the
+                        // Content-Disposition filename param (e.g. "[", "]" in DJI names).
+                        val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
+                        diag(DiagLevel.INFO, "UPLOAD", "${log.file.name} → \"$safeName\"  (${log.sizeFormatted})")
+                        val part = MultipartBody.Part.createFormData(
+                            "files", safeName,
+                            log.file.asRequestBody("text/plain".toMediaTypeOrNull())
+                        )
 
-                if (response.isSuccessful && body != null) {
-                    if (body.errors.isNotEmpty() && body.imported == 0) {
-                        pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    } else if (body.errors.isNotEmpty()) {
-                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
-                    } else if (body.imported == 0 && body.skipped > 0) {
-                        pending.forEach { setStatus(it, UploadStatus.DUPLICATE) }
-                    } else {
-                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
-                    }
+                        val response = ApiClient.create(url).uploadFlights(key, listOf(part))
+                        val body = response.body()
 
-                    _statusMessage.value = buildString {
-                        if (body.imported > 0) append("${body.imported} imported")
-                        if (body.skipped > 0) {
-                            if (isNotEmpty()) append(", ")
-                            append("${body.skipped} already on server")
+                        diag(DiagLevel.INFO, "UPLOAD", "  HTTP ${response.code()}")
+                        if (body != null) {
+                            diag(DiagLevel.INFO, "UPLOAD", "  imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
+                            body.errors.forEachIndexed { i, err -> diag(DiagLevel.ERROR, "UPLOAD", "  error[$i]: $err") }
+                        } else {
+                            val rawErr = response.errorBody()?.string()?.take(500) ?: "(no body)"
+                            diag(DiagLevel.ERROR, "UPLOAD", "  body null — raw: $rawErr")
                         }
-                        if (body.errors.isNotEmpty()) {
-                            if (isNotEmpty()) append(", ")
-                            append("${body.errors.size} parse error(s)")
-                            append(": ${body.errors.first().take(200)}")
+
+                        when {
+                            !response.isSuccessful -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                                // Auth failures are permanent — no point retrying remaining files
+                                if (response.code() in listOf(401, 403)) aborted = true
+                            }
+                            body == null -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                            }
+                            body.errors.isNotEmpty() -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                            }
+                            body.skipped > 0 -> {
+                                setStatus(log, UploadStatus.DUPLICATE)
+                                totalSkipped++
+                            }
+                            else -> {
+                                setStatus(log, UploadStatus.SYNCED)
+                                totalImported += body.imported
+                            }
                         }
-                        if (isEmpty()) append("Upload sent but server reported 0 imported — check Diagnostics")
-                        val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
-                        if (syncedCount > 0) append(" — tap Delete to clean up controller")
+                    } catch (e: UnknownHostException) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "UnknownHostException: ${e.message}")
+                        aborted = true
+                    } catch (e: SocketTimeoutException) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "SocketTimeoutException: ${e.message}")
+                        aborted = true
+                    } catch (e: Exception) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
                     }
-                } else {
-                    val rawErr = response.errorBody()?.string()?.take(1000) ?: "(no body)"
-                    val msg = when (response.code()) {
-                        401, 403 -> "Invalid API key — check Settings"
-                        404      -> "Upload endpoint not found — check server URL"
-                        else     -> "Upload failed (HTTP ${response.code()})"
-                    }
-                    diag(DiagLevel.ERROR, "UPLOAD", "Non-2xx response: $msg | raw: $rawErr")
-                    pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    _statusMessage.value = msg
                 }
-            } catch (e: UnknownHostException) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "DNS lookup failed — check URL"
-                diag(DiagLevel.ERROR, "UPLOAD", "UnknownHostException: ${e.message}")
-            } catch (e: SocketTimeoutException) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "Connection timed out — server may be down"
-                diag(DiagLevel.ERROR, "UPLOAD", "SocketTimeoutException: ${e.message}")
-            } catch (e: Exception) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "Connection error: ${e.message?.take(100)}"
-                diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 _isUploading.value = false
+            }
+
+            _statusMessage.value = buildString {
+                if (totalImported > 0) append("$totalImported imported")
+                if (totalSkipped > 0) {
+                    if (isNotEmpty()) append(", ")
+                    append("$totalSkipped already on server")
+                }
+                if (totalErrors > 0) {
+                    if (isNotEmpty()) append(", ")
+                    append("$totalErrors error(s) — tap Retry")
+                }
+                if (isEmpty()) append("Upload complete — check Diagnostics")
+                val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
+                if (syncedCount > 0) append(" — tap Delete to clean up controller")
             }
         }
     }
