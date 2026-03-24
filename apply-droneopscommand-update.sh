@@ -386,6 +386,21 @@ if "device_keys" not in content:
     print("  main.py updated")
 else:
     print("  main.py already patched — skipping")
+
+# Starlette 0.31+ defaults MultiPartParser.max_file_size to 1 MB which is too
+# small for DJI flight logs (typically 3–8 MB).  Raise it to 50 MB globally.
+with open(path) as f:
+    content = f.read()
+
+file_size_patch = "from starlette.formparsers import MultiPartParser\nMultiPartParser.max_file_size = 50 * 1024 * 1024  # 50 MB — DJI logs can be 3–8 MB\n\n"
+if "MultiPartParser.max_file_size" not in content:
+    # Insert after the last top-level import block, before app = FastAPI(...)
+    content = content.replace("app = FastAPI(", file_size_patch + "app = FastAPI(", 1)
+    with open(path, "w") as f:
+        f.write(content)
+    print("  main.py: MultiPartParser.max_file_size raised to 50 MB")
+else:
+    print("  main.py: max_file_size already configured — skipping")
 PYEOF
 
 # ── Commit and push ───────────────────────────────────────────────────────────
