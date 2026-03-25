@@ -90,8 +90,6 @@ class MainViewModel : ViewModel() {
     fun loadSettings(prefs: SharedPreferences) {
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
-        _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
-            ?: DEFAULT_PATHS.joinToString("\n")
 
         // Log storage permission state so it's immediately visible in Diagnostics
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -99,11 +97,14 @@ class MainViewModel : ViewModel() {
             if (granted) {
                 diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED")
             } else {
-                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — open Settings → Apps → DroneOpsSync → Permissions and grant 'All files access'")
+                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — scan will fail on Android 11+; open Settings and grant 'All files access' to this app")
             }
         } else {
-            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage")
+            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE needed)")
         }
+
+        _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
+            ?: DEFAULT_PATHS.joinToString("\n")
     }
 
     fun saveSettings(
