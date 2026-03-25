@@ -1,6 +1,8 @@
 package com.droneopssync.app.viewmodel
 
 import android.content.SharedPreferences
+import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -93,6 +95,18 @@ class MainViewModel : ViewModel() {
     fun loadSettings(prefs: SharedPreferences) {
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
+
+        // Log storage permission state so it's immediately visible in Diagnostics
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val granted = Environment.isExternalStorageManager()
+            if (granted) {
+                diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED")
+            } else {
+                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — scan will fail on Android 11+; open Settings and grant 'All files access' to this app")
+            }
+        } else {
+            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE needed)")
+        }
 
         // If the saved paths version doesn't match, reset to current defaults.
         // This ensures old broad paths from previous installs don't persist.
@@ -200,8 +214,11 @@ class MainViewModel : ViewModel() {
                 val dir = File(pathStr)
                 Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
+                    // maxDepth=4: covers flat layout and date-organised sub-folders
+                    // (e.g. FlightRecord/YYYY/MM/file.txt). Previously 2, which
+                    // silently missed files on controllers that nest logs more deeply.
                     val hits = dir.walkTopDown()
-                        .maxDepth(2)
+                        .maxDepth(4)
                         .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
                         .toList()
                     hits.forEach {
