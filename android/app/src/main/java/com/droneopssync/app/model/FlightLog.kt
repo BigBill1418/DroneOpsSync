@@ -32,3 +32,12 @@ enum class UploadStatus {
     DELETED,
     ERROR
 }
+
+enum class DiagLevel { INFO, WARN, ERROR }
+
+data class DiagLog(
+    val timestamp: Long = System.currentTimeMillis(),
+    val level: DiagLevel,
+    val tag: String,
+    val message: String
+)

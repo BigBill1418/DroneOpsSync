@@ -1,10 +1,14 @@
 package com.droneopssync.app.viewmodel
 
 import android.content.SharedPreferences
+import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.droneopssync.app.api.ApiClient
+import com.droneopssync.app.model.DiagLevel
+import com.droneopssync.app.model.DiagLog
 import com.droneopssync.app.model.FlightLog
 import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +31,13 @@ private const val TAG = "MainViewModel"
 //   Bill's S25 Ultra  → Android/data/dji.go.v5/files/FlightRecord
 //   DJI RC Plus       → DJI/com.dji.industry.pilot/FlightRecord
 //   DJI RC Plus 2     → DJI/com.dji.industry.pilot/FlightRecord
+//   Phones (DJI Fly)  → Android/data/com.dji.fly/files/FlightRecord
+//   DJI Smart Controller / Mavic 3 Pro (GO 4 era) → DJI/dji.go.v4/FlightRecord
 private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord",
-    "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord"
+    "/storage/emulated/0/DJI/com.dji.industry.pilot/FlightRecord",
+    "/storage/emulated/0/Android/data/com.dji.fly/files/FlightRecord",
+    "/storage/emulated/0/DJI/dji.go.v4/FlightRecord"
 )
 
 private const val PREF_SERVER_URL   = "server_url"
@@ -40,10 +48,26 @@ private const val DEFAULT_SERVER    = "http://192.168.50.20:3080"
 
 // Bump this whenever DEFAULT_PATHS changes — forces a one-time reset of
 // any previously saved paths so users always get the correct fleet paths.
-private const val PATHS_VERSION = 2
+private const val PATHS_VERSION = 4
 
 class MainViewModel : ViewModel() {
 
+    // ── Diagnostic log buffer ─────────────────────────────────────────────────
+    private val _diagLogs = MutableStateFlow<List<DiagLog>>(emptyList())
+    val diagLogs: StateFlow<List<DiagLog>> = _diagLogs
+
+    private fun diag(level: DiagLevel, tag: String, message: String) {
+        val entry = DiagLog(level = level, tag = tag, message = message)
+        Log.println(
+            when (level) { DiagLevel.ERROR -> Log.ERROR; DiagLevel.WARN -> Log.WARN; else -> Log.DEBUG },
+            TAG, "[$tag] $message"
+        )
+        _diagLogs.value = (_diagLogs.value + entry).takeLast(500)
+    }
+
+    fun clearDiagLogs() { _diagLogs.value = emptyList() }
+
+    // ── Flight logs ───────────────────────────────────────────────────────────
     private val _logs = MutableStateFlow<List<FlightLog>>(emptyList())
     val logs: StateFlow<List<FlightLog>> = _logs
 
@@ -71,6 +95,18 @@ class MainViewModel : ViewModel() {
     fun loadSettings(prefs: SharedPreferences) {
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
+
+        // Log storage permission state so it's immediately visible in Diagnostics
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val granted = Environment.isExternalStorageManager()
+            if (granted) {
+                diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED")
+            } else {
+                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — scan will fail on Android 11+; open Settings and grant 'All files access' to this app")
+            }
+        } else {
+            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE needed)")
+        }
 
         // If the saved paths version doesn't match, reset to current defaults.
         // This ensures old broad paths from previous installs don't persist.
@@ -121,31 +157,42 @@ class MainViewModel : ViewModel() {
             if (url.isBlank()) {
                 _serverReachable.value = false
                 _connectionError.value = "No server URL configured — open Settings"
+                diag(DiagLevel.WARN, "HEALTH", "No server URL configured")
                 return@launch
             }
             if (!url.isValidUrl()) {
                 _serverReachable.value = false
                 _connectionError.value = "URL must start with http:// or https://"
                 _statusMessage.value = "Invalid URL — must start with http:// or https://"
+                diag(DiagLevel.WARN, "HEALTH", "Invalid URL: $url")
                 return@launch
             }
 
+            diag(DiagLevel.INFO, "HEALTH", "GET $url/health")
             try {
                 val response = ApiClient.create(url).health()
-                _serverReachable.value = response.code() < 500
-                if (response.code() >= 500) {
-                    _connectionError.value = "Server returned HTTP ${response.code()}"
+                val ok = response.code() < 500
+                _serverReachable.value = ok
+                if (!ok) {
+                    val err = "Server returned HTTP ${response.code()}"
+                    _connectionError.value = err
+                    diag(DiagLevel.ERROR, "HEALTH", err)
+                } else {
+                    diag(DiagLevel.INFO, "HEALTH", "HTTP ${response.code()} — server reachable")
                 }
             } catch (e: UnknownHostException) {
                 _serverReachable.value = false
                 _connectionError.value = "DNS lookup failed — check the URL"
+                diag(DiagLevel.ERROR, "HEALTH", "UnknownHostException: ${e.message}")
             } catch (e: SocketTimeoutException) {
                 _serverReachable.value = false
                 _connectionError.value = "Connection timed out — is the server running?"
+                diag(DiagLevel.ERROR, "HEALTH", "SocketTimeoutException: ${e.message}")
             } catch (e: IOException) {
                 Log.e(TAG, "Health check failed", e)
                 _serverReachable.value = false
                 _connectionError.value = "Network error: ${e.message?.take(120)}"
+                diag(DiagLevel.ERROR, "HEALTH", "IOException: ${e.message}")
             }
         }
     }
@@ -157,42 +204,59 @@ class MainViewModel : ViewModel() {
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
 
-            val found         = mutableListOf<FlightLog>()
-            val missingPaths  = mutableListOf<String>()
-            val matchedPaths  = mutableListOf<String>()
-            val validExts     = setOf("txt") // DJI flight records are .txt only
+            val found        = mutableListOf<FlightLog>()
+            val missingPaths = mutableListOf<String>()
+            // path → count of .txt files found in it
+            val pathCounts   = mutableListOf<Pair<String, Int>>()
 
+            diag(DiagLevel.INFO, "SCAN", "Scanning ${paths.size} path(s)")
             for (pathStr in paths) {
                 val dir = File(pathStr)
                 Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
-                    matchedPaths += pathStr
-                    // Walk all subdirectories — DJI organises records into date sub-folders
-                    dir.walkTopDown()
-                        .filter { f -> f.isFile && f.extension.lowercase() in validExts }
-                        .forEach {
-                            Log.d(TAG, "  found: ${it.absolutePath}")
-                            found.add(FlightLog(file = it))
-                        }
+                    // maxDepth=4: covers flat layout and date-organised sub-folders
+                    // (e.g. FlightRecord/YYYY/MM/file.txt). Previously 2, which
+                    // silently missed files on controllers that nest logs more deeply.
+                    val hits = dir.walkTopDown()
+                        .maxDepth(4)
+                        .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
+                        .toList()
+                    hits.forEach {
+                        Log.d(TAG, "  found: ${it.absolutePath}")
+                        found.add(FlightLog(file = it))
+                    }
+                    pathCounts += pathStr to hits.size
+                    diag(DiagLevel.INFO, "SCAN", "$pathStr → ${hits.size} file(s)")
+                    hits.forEach { diag(DiagLevel.INFO, "SCAN", "  ${it.name}  (${it.length()} B)") }
                 } else {
                     missingPaths += pathStr
-                    Log.w(TAG, "scanLogs: path not found → $pathStr")
+                    diag(DiagLevel.WARN, "SCAN", "Path not found: $pathStr")
                 }
             }
 
             found.sortByDescending { it.file.lastModified() }
             _logs.value = found
 
+            val matchedPaths = pathCounts.filter { it.second >= 0 }
             _statusMessage.value = when {
                 paths.isEmpty() ->
                     "No scan paths configured — add paths in Settings"
-                found.isEmpty() && matchedPaths.isEmpty() ->
+                matchedPaths.isEmpty() ->
                     "None of the ${paths.size} configured path(s) exist on this device — check Settings"
                 found.isEmpty() ->
-                    "Directories found but no log files inside — DJI app may store logs elsewhere"
-                else ->
-                    "${found.size} log file(s) found" +
-                        if (missingPaths.isNotEmpty()) " (${missingPaths.size} path(s) missing)" else ""
+                    "Directories found but no .txt log files inside — DJI app may store logs elsewhere"
+                else -> {
+                    // Show a breakdown so the user can see exactly where files come from
+                    val breakdown = pathCounts.filter { it.second > 0 }
+                        .joinToString("  |  ") { (p, n) ->
+                            val label = p.substringAfterLast("/").substringAfterLast("\\")
+                            val parent = p.substringBeforeLast("/").substringAfterLast("/")
+                            "$n × $parent/$label"
+                        }
+                    "${found.size} log(s) found" +
+                        (if (missingPaths.isNotEmpty()) " · ${missingPaths.size} path(s) missing" else "") +
+                        "\n$breakdown"
+                }
             }
             Log.d(TAG, "scanLogs done: found=${found.size} matched=${matchedPaths.size} missing=${missingPaths.size}")
         }
@@ -220,72 +284,102 @@ class MainViewModel : ViewModel() {
             _isUploading.value = true
             pending.forEach { setStatus(it, UploadStatus.UPLOADING) }
 
+            diag(DiagLevel.INFO, "UPLOAD", "Starting upload: ${pending.size} file(s) → $url")
+            pending.forEach { diag(DiagLevel.INFO, "UPLOAD", "  ${it.file.name}  (${it.sizeFormatted})") }
+
+            var totalImported = 0
+            var totalSkipped  = 0
+            var totalErrors   = 0
+            // Set true on auth failure or network error so remaining files are
+            // marked ERROR immediately rather than attempting doomed requests.
+            var aborted = false
+
             try {
-                val parts = pending.map { log ->
-                    val body = log.file.asRequestBody("application/octet-stream".toMediaTypeOrNull())
-                    MultipartBody.Part.createFormData("files", log.file.name, body)
-                }
-
-                val response = ApiClient.create(url).uploadFlights(key, parts)
-                val body = response.body()
-
-                Log.d(TAG, "Upload response: HTTP ${response.code()}")
-                if (body != null) {
-                    Log.d(TAG, "  imported=${body.imported} skipped=${body.skipped} errors=${body.errors}")
-                } else {
-                    Log.w(TAG, "  response body is null (raw: ${response.errorBody()?.string()?.take(500)})")
-                }
-
-                if (response.isSuccessful && body != null) {
-                    // Mark files based on what the server actually did
-                    if (body.errors.isNotEmpty() && body.imported == 0) {
-                        // Server couldn't parse any files
-                        pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    } else if (body.errors.isNotEmpty()) {
-                        // Partial success — some imported, some failed
-                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
-                    } else if (body.imported == 0 && body.skipped > 0) {
-                        // All files already on server
-                        pending.forEach { setStatus(it, UploadStatus.DUPLICATE) }
-                    } else {
-                        pending.forEach { setStatus(it, UploadStatus.SYNCED) }
+                for (log in pending) {
+                    if (aborted) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        continue
                     }
+                    try {
+                        // Strip characters that break multipart/form-data parsers in the
+                        // Content-Disposition filename param (e.g. "[", "]" in DJI names).
+                        val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
+                        diag(DiagLevel.INFO, "UPLOAD", "${log.file.name} → \"$safeName\"  (${log.sizeFormatted})")
+                        val part = MultipartBody.Part.createFormData(
+                            "files", safeName,
+                            log.file.asRequestBody("text/plain".toMediaTypeOrNull())
+                        )
 
-                    _statusMessage.value = buildString {
-                        if (body.imported > 0) append("${body.imported} imported")
-                        if (body.skipped > 0) {
-                            if (isNotEmpty()) append(", ")
-                            append("${body.skipped} already on server")
+                        val response = ApiClient.create(url).uploadFlights(key, listOf(part))
+                        val body = response.body()
+
+                        diag(DiagLevel.INFO, "UPLOAD", "  HTTP ${response.code()}")
+                        if (body != null) {
+                            diag(DiagLevel.INFO, "UPLOAD", "  imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
+                            body.errors.forEachIndexed { i, err -> diag(DiagLevel.ERROR, "UPLOAD", "  error[$i]: $err") }
+                        } else {
+                            val rawErr = response.errorBody()?.string()?.take(500) ?: "(no body)"
+                            diag(DiagLevel.ERROR, "UPLOAD", "  body null — raw: $rawErr")
                         }
-                        if (body.errors.isNotEmpty()) {
-                            if (isNotEmpty()) append(", ")
-                            append("${body.errors.size} parse error(s)")
-                            // Show first error for diagnostics
-                            append(": ${body.errors.first().take(80)}")
+
+                        when {
+                            !response.isSuccessful -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                                // Auth failures are permanent — no point retrying remaining files
+                                if (response.code() in listOf(401, 403)) aborted = true
+                            }
+                            body == null -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                            }
+                            body.errors.isNotEmpty() -> {
+                                setStatus(log, UploadStatus.ERROR)
+                                totalErrors++
+                            }
+                            body.skipped > 0 -> {
+                                setStatus(log, UploadStatus.DUPLICATE)
+                                totalSkipped++
+                            }
+                            else -> {
+                                setStatus(log, UploadStatus.SYNCED)
+                                totalImported += body.imported
+                            }
                         }
-                        if (isEmpty()) append("Upload sent but server reported 0 imported — check server logs")
-                        val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
-                        if (syncedCount > 0) append(" — tap Delete to clean up controller")
-                    }
-                } else {
-                    pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                    _statusMessage.value = when (response.code()) {
-                        401, 403 -> "Invalid API key — check Settings"
-                        404      -> "Upload endpoint not found — check server URL"
-                        else     -> "Upload failed (HTTP ${response.code()})"
+                    } catch (e: UnknownHostException) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "UnknownHostException: ${e.message}")
+                        aborted = true
+                    } catch (e: SocketTimeoutException) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "SocketTimeoutException: ${e.message}")
+                        aborted = true
+                    } catch (e: Exception) {
+                        setStatus(log, UploadStatus.ERROR)
+                        totalErrors++
+                        diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
                     }
                 }
-            } catch (e: UnknownHostException) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "DNS lookup failed — check URL"
-            } catch (e: SocketTimeoutException) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "Connection timed out — server may be down"
-            } catch (e: Exception) {
-                pending.forEach { setStatus(it, UploadStatus.ERROR) }
-                _statusMessage.value = "Connection error: ${e.message?.take(100)}"
             } finally {
                 _isUploading.value = false
+            }
+
+            _statusMessage.value = buildString {
+                if (totalImported > 0) append("$totalImported imported")
+                if (totalSkipped > 0) {
+                    if (isNotEmpty()) append(", ")
+                    append("$totalSkipped already on server")
+                }
+                if (totalErrors > 0) {
+                    if (isNotEmpty()) append(", ")
+                    append("$totalErrors error(s) — tap Retry")
+                }
+                if (isEmpty()) append("Upload complete — check Diagnostics")
+                val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
+                if (syncedCount > 0) append(" — tap Delete to clean up controller")
             }
         }
     }
