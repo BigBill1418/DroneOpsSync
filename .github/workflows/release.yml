@@ -1,0 +1,52 @@
+name: Build & Release APK
+
+# Runs after the version-bump workflow commits to main.
+# Builds the debug APK and publishes it as a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/version.properties'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)
+          echo "name=$VERSION" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          mv android/app/build/outputs/apk/debug/app-debug.apk \
+             DroneOpsSync-v${{ steps.version.outputs.name }}.apk
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.name }}
+          name: DroneOpsSync v${{ steps.version.outputs.name }}
+          files: DroneOpsSync-v${{ steps.version.outputs.name }}.apk
+          generate_release_notes: true
