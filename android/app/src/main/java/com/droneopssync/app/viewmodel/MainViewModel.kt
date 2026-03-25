@@ -44,7 +44,7 @@ private const val PREF_SERVER_URL   = "server_url"
 private const val PREF_API_KEY      = "api_key"
 private const val PREF_LOG_PATHS    = "log_paths"
 private const val PREF_PATHS_VER    = "log_paths_version"
-private const val DEFAULT_SERVER    = "http://192.168.50.20:3080"
+private const val DEFAULT_SERVER    = "http://10.50.0.5:3080"
 
 // Bump this whenever DEFAULT_PATHS changes — forces a one-time reset of
 // any previously saved paths so users always get the correct fleet paths.
@@ -219,7 +219,7 @@ class MainViewModel : ViewModel() {
                     // silently missed files on controllers that nest logs more deeply.
                     val hits = dir.walkTopDown()
                         .maxDepth(4)
-                        .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
+                        .filter { f -> f.isFile && f.extension.lowercase() in setOf("txt", "dat") }
                         .toList()
                     hits.forEach {
                         Log.d(TAG, "  found: ${it.absolutePath}")
