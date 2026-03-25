@@ -40,15 +40,10 @@ private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/DJI/dji.go.v4/FlightRecord"
 )
 
-private const val PREF_SERVER_URL   = "server_url"
-private const val PREF_API_KEY      = "api_key"
-private const val PREF_LOG_PATHS    = "log_paths"
-private const val PREF_PATHS_VER    = "log_paths_version"
-private const val DEFAULT_SERVER    = "http://192.168.50.20:3080"
-
-// Bump this whenever DEFAULT_PATHS changes — forces a one-time reset of
-// any previously saved paths so users always get the correct fleet paths.
-private const val PATHS_VERSION = 4
+private const val PREF_SERVER_URL = "server_url"
+private const val PREF_API_KEY    = "api_key"
+private const val PREF_LOG_PATHS  = "log_paths"
+private const val DEFAULT_SERVER  = "http://10.50.0.5:3080"
 
 class MainViewModel : ViewModel() {
 
@@ -95,6 +90,8 @@ class MainViewModel : ViewModel() {
     fun loadSettings(prefs: SharedPreferences) {
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
+        _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
+            ?: DEFAULT_PATHS.joinToString("\n")
 
         // Log storage permission state so it's immediately visible in Diagnostics
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -102,25 +99,10 @@ class MainViewModel : ViewModel() {
             if (granted) {
                 diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED")
             } else {
-                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — scan will fail on Android 11+; open Settings and grant 'All files access' to this app")
+                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — open Settings → Apps → DroneOpsSync → Permissions and grant 'All files access'")
             }
         } else {
-            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE needed)")
-        }
-
-        // If the saved paths version doesn't match, reset to current defaults.
-        // This ensures old broad paths from previous installs don't persist.
-        val savedVer = prefs.getInt(PREF_PATHS_VER, 0)
-        if (savedVer < PATHS_VERSION) {
-            val defaults = DEFAULT_PATHS.joinToString("\n")
-            prefs.edit()
-                .putString(PREF_LOG_PATHS, defaults)
-                .putInt(PREF_PATHS_VER, PATHS_VERSION)
-                .apply()
-            _logPathsText.value = defaults
-        } else {
-            _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
-                ?: DEFAULT_PATHS.joinToString("\n")
+            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage")
         }
     }
 
@@ -206,27 +188,21 @@ class MainViewModel : ViewModel() {
 
             val found        = mutableListOf<FlightLog>()
             val missingPaths = mutableListOf<String>()
-            // path → count of .txt files found in it
-            val pathCounts   = mutableListOf<Pair<String, Int>>()
 
             diag(DiagLevel.INFO, "SCAN", "Scanning ${paths.size} path(s)")
             for (pathStr in paths) {
                 val dir = File(pathStr)
+                diag(DiagLevel.INFO, "SCAN", "$pathStr — exists=${dir.exists()} isDir=${dir.isDirectory}")
                 Log.d(TAG, "scanLogs: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
                 if (dir.exists() && dir.isDirectory) {
-                    // maxDepth=4: covers flat layout and date-organised sub-folders
-                    // (e.g. FlightRecord/YYYY/MM/file.txt). Previously 2, which
-                    // silently missed files on controllers that nest logs more deeply.
-                    val hits = dir.walkTopDown()
-                        .maxDepth(4)
-                        .filter { f -> f.isFile && f.extension.lowercase() == "txt" }
-                        .toList()
+                    val hits = dir.listFiles { f ->
+                        f.isFile && f.extension.lowercase() in listOf("txt", "log", "csv", "json")
+                    }?.toList() ?: emptyList()
                     hits.forEach {
                         Log.d(TAG, "  found: ${it.absolutePath}")
                         found.add(FlightLog(file = it))
                     }
-                    pathCounts += pathStr to hits.size
-                    diag(DiagLevel.INFO, "SCAN", "$pathStr → ${hits.size} file(s)")
+                    diag(DiagLevel.INFO, "SCAN", "  ${hits.size} file(s) found")
                     hits.forEach { diag(DiagLevel.INFO, "SCAN", "  ${it.name}  (${it.length()} B)") }
                 } else {
                     missingPaths += pathStr
@@ -237,28 +213,11 @@ class MainViewModel : ViewModel() {
             found.sortByDescending { it.file.lastModified() }
             _logs.value = found
 
-            val matchedPaths = pathCounts.filter { it.second >= 0 }
             _statusMessage.value = when {
-                paths.isEmpty() ->
-                    "No scan paths configured — add paths in Settings"
-                matchedPaths.isEmpty() ->
-                    "None of the ${paths.size} configured path(s) exist on this device — check Settings"
-                found.isEmpty() ->
-                    "Directories found but no .txt log files inside — DJI app may store logs elsewhere"
-                else -> {
-                    // Show a breakdown so the user can see exactly where files come from
-                    val breakdown = pathCounts.filter { it.second > 0 }
-                        .joinToString("  |  ") { (p, n) ->
-                            val label = p.substringAfterLast("/").substringAfterLast("\\")
-                            val parent = p.substringBeforeLast("/").substringAfterLast("/")
-                            "$n × $parent/$label"
-                        }
-                    "${found.size} log(s) found" +
-                        (if (missingPaths.isNotEmpty()) " · ${missingPaths.size} path(s) missing" else "") +
-                        "\n$breakdown"
-                }
+                found.isEmpty() -> "No log files found — check paths in Settings"
+                else -> "${found.size} log file(s) found across ${paths.size - missingPaths.size} path(s)"
             }
-            Log.d(TAG, "scanLogs done: found=${found.size} matched=${matchedPaths.size} missing=${missingPaths.size}")
+            Log.d(TAG, "scanLogs done: found=${found.size}")
         }
     }
 
