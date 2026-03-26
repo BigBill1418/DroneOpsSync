@@ -28,9 +28,9 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    // Launcher for READ_EXTERNAL_STORAGE on Android 9/10
+    // Launcher for READ + WRITE EXTERNAL_STORAGE on Android 9/10
     private val requestStoragePermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* nothing to do */ }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* nothing to do */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,11 +44,14 @@ class MainActivity : ComponentActivity() {
                 startActivity(intent)
             }
         } else {
-            // Android 9/10 — request READ_EXTERNAL_STORAGE runtime permission
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-                requestStoragePermission.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
+            // Android 9/10 — request READ + WRITE so scan and delete both work
+            val toRequest = arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ).filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }.toTypedArray()
+            if (toRequest.isNotEmpty()) requestStoragePermission.launch(toRequest)
         }
 
         val prefs = getSharedPreferences("droneopssync_prefs", MODE_PRIVATE)
