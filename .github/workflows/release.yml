@@ -1,16 +1,17 @@
 name: Build & Release APK
 
-# Runs after the version-bump workflow commits to main.
-# Builds the debug APK and publishes it as a GitHub release.
+# Runs after the version-bump workflow completes on main.
+# Using workflow_run instead of push so [skip ci] commits don't block it.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Bump patch version"]
     branches: [main]
-    paths:
-      - 'android/version.properties'
+    types: [completed]
 
 jobs:
   release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
