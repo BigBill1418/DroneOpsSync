@@ -36,7 +36,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          bash gradlew assembleDebug --no-daemon
 
       - name: Rename APK
         run: |
