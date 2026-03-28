@@ -346,8 +346,10 @@ class MainViewModel : ViewModel() {
                     append("$totalErrors error(s) — tap Retry")
                 }
                 if (isEmpty()) append("Upload complete — check Diagnostics")
-                val syncedCount = _logs.value.count { it.uploadStatus == UploadStatus.SYNCED }
-                if (syncedCount > 0) append(" — tap Delete to clean up controller")
+                val deletableCount = _logs.value.count {
+                    it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE
+                }
+                if (deletableCount > 0) append(" — tap Delete to clean up controller")
             }
         }
     }
@@ -362,7 +364,9 @@ class MainViewModel : ViewModel() {
 
     fun deleteSynced() {
         viewModelScope.launch(Dispatchers.IO) {
-            val toDelete = _logs.value.filter { it.uploadStatus == UploadStatus.SYNCED }
+            val toDelete = _logs.value.filter {
+                it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE
+            }
             var deleted = 0
             var failed = 0
             for (log in toDelete) {
