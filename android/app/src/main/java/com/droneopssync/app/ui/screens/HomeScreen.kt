@@ -10,8 +10,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,12 +56,13 @@ import com.droneopssync.app.model.UploadStatus
 import com.droneopssync.app.ui.theme.*
 import com.droneopssync.app.viewmodel.MainViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
     onNavigateToSettings: () -> Unit,
     onNavigateToDiag: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {},
     onInstallUpdate: (String) -> Unit = {}
 ) {
     val logs            by viewModel.logs.collectAsState()
@@ -133,6 +137,9 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(onClick = onNavigateToHistory) {
+                        Icon(Icons.Outlined.History, contentDescription = "Sync History", tint = DocMuted)
+                    }
                     IconButton(onClick = onNavigateToDiag) {
                         Icon(Icons.Outlined.BugReport, contentDescription = "Diagnostics", tint = DocMuted)
                     }
@@ -183,7 +190,7 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(logs, key = { it.file.absolutePath }) { log ->
-                            LogFileCard(log)
+                            LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
                         }
                     }
                 }
@@ -205,6 +212,9 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = onNavigateToHistory) {
+                    Icon(Icons.Outlined.History, contentDescription = "Sync History", tint = DocMuted)
+                }
                 IconButton(onClick = onNavigateToDiag) {
                     Icon(Icons.Outlined.BugReport, contentDescription = "Diagnostics", tint = DocMuted)
                 }
@@ -246,7 +256,7 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(logs, key = { it.file.absolutePath }) { log ->
-                        LogFileCard(log)
+                        LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
                     }
                 }
             }
@@ -770,8 +780,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 // ── Log file card ─────────────────────────────────────────────────────────────
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LogFileCard(log: FlightLog) {
+private fun LogFileCard(log: FlightLog, onRetry: () -> Unit = {}) {
     val (statusColor, statusLabel, statusIcon) = when (log.uploadStatus) {
         UploadStatus.PENDING   -> Triple(DocMuted,    "PENDING",   Icons.Default.Schedule)
         UploadStatus.UPLOADING -> Triple(DocAmber,    "SYNCING",   Icons.Default.CloudUpload)
@@ -780,12 +791,19 @@ private fun LogFileCard(log: FlightLog) {
         UploadStatus.DELETED   -> Triple(DocDeleted,  "DELETED",   Icons.Default.Delete)
         UploadStatus.ERROR     -> Triple(DocRed,      "ERROR",     Icons.Default.Error)
     }
+    val canRetry = log.uploadStatus == UploadStatus.ERROR
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = if (canRetry) onRetry else null,
+                onLongClickLabel = if (canRetry) "Retry this file" else null
+            ),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = DocPanel),
-        border = BorderStroke(1.dp, DocSurface)
+        border = BorderStroke(1.dp, if (canRetry) DocRed.copy(alpha = 0.4f) else DocSurface)
     ) {
         Row(
             modifier = Modifier
