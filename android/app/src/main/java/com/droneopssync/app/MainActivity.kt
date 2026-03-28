@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -23,6 +24,7 @@ import com.droneopssync.app.ui.screens.SettingsScreen
 import com.droneopssync.app.ui.screens.SplashScreen
 import com.droneopssync.app.ui.theme.DroneOpsSyncTheme
 import com.droneopssync.app.viewmodel.MainViewModel
+import java.io.File
 
 class MainActivity : ComponentActivity() {
 
@@ -57,6 +59,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("droneopssync_prefs", MODE_PRIVATE)
         viewModel.loadSettings(prefs)
         viewModel.checkServerHealth()
+        viewModel.checkForUpdate()
 
         setContent {
             DroneOpsSyncTheme {
@@ -77,7 +80,8 @@ class MainActivity : ComponentActivity() {
                         HomeScreen(
                             viewModel = viewModel,
                             onNavigateToSettings = { navController.navigate("settings") },
-                            onNavigateToDiag = { navController.navigate("diag") }
+                            onNavigateToDiag = { navController.navigate("diag") },
+                            onInstallUpdate = { apkPath -> installApk(apkPath) }
                         )
                     }
                     composable("settings") {
@@ -96,5 +100,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun installApk(apkPath: String) {
+        val apkFile = File(apkPath)
+        if (!apkFile.exists()) return
+        val uri = FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            apkFile
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 }

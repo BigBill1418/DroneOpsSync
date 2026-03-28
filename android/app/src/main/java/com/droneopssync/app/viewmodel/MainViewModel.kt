@@ -6,10 +6,13 @@ import android.os.Environment
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.droneopssync.app.BuildConfig
 import com.droneopssync.app.api.ApiClient
+import com.droneopssync.app.api.GitHubClient
 import com.droneopssync.app.model.DiagLevel
 import com.droneopssync.app.model.DiagLog
 import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.IOException
@@ -86,6 +91,9 @@ class MainViewModel : ViewModel() {
 
     private val _connectionError = MutableStateFlow<String?>(null)
     val connectionError: StateFlow<String?> = _connectionError
+
+    private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val updateState: StateFlow<UpdateState> = _updateState
 
     fun loadSettings(prefs: SharedPreferences) {
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
@@ -377,6 +385,85 @@ class MainViewModel : ViewModel() {
         _logs.value = _logs.value.map {
             if (it.file.absolutePath == log.file.absolutePath) it.copy(uploadStatus = status) else it
         }
+    }
+
+    fun checkForUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _updateState.value = UpdateState.Checking
+            try {
+                val response = GitHubClient.service.getLatestRelease("BigBill1418", "DroneOpsSync")
+                val release = response.body()
+                if (!response.isSuccessful || release == null) {
+                    _updateState.value = UpdateState.Idle
+                    return@launch
+                }
+                // Strip leading 'v' from tag if present
+                val remoteVersion = release.tagName.trimStart('v')
+                val currentVersion = BuildConfig.VERSION_NAME
+                if (remoteVersion == currentVersion) {
+                    _updateState.value = UpdateState.UpToDate
+                    return@launch
+                }
+                val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk") }
+                if (apkAsset == null) {
+                    _updateState.value = UpdateState.Idle
+                    return@launch
+                }
+                _updateState.value = UpdateState.Available(
+                    version = remoteVersion,
+                    downloadUrl = apkAsset.downloadUrl,
+                    sizeBytes = apkAsset.size
+                )
+            } catch (e: Exception) {
+                _updateState.value = UpdateState.Idle
+                diag(DiagLevel.WARN, "OTA", "Update check failed: ${e.message}")
+            }
+        }
+    }
+
+    fun downloadUpdate(cacheDir: File, onReadyToInstall: (String) -> Unit) {
+        val state = _updateState.value
+        if (state !is UpdateState.Available) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _updateState.value = UpdateState.Downloading(0)
+            val apkFile = File(cacheDir, "droneopssync-update.apk")
+            try {
+                val client = OkHttpClient()
+                val request = Request.Builder().url(state.downloadUrl).build()
+                val response = client.newCall(request).execute()
+                val body = response.body ?: throw IOException("Empty response body")
+                val totalBytes = body.contentLength()
+                apkFile.outputStream().use { out ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(8192)
+                        var downloaded = 0L
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            out.write(buffer, 0, read)
+                            downloaded += read
+                            if (totalBytes > 0) {
+                                val progress = ((downloaded * 100) / totalBytes).toInt()
+                                _updateState.value = UpdateState.Downloading(progress)
+                            }
+                        }
+                    }
+                }
+                _updateState.value = UpdateState.ReadyToInstall(apkFile.absolutePath)
+                onReadyToInstall(apkFile.absolutePath)
+            } catch (e: Exception) {
+                apkFile.delete()
+                _updateState.value = UpdateState.Available(
+                    version = state.version,
+                    downloadUrl = state.downloadUrl,
+                    sizeBytes = state.sizeBytes
+                )
+                diag(DiagLevel.ERROR, "OTA", "Download failed: ${e.message}")
+            }
+        }
+    }
+
+    fun dismissUpdate() {
+        _updateState.value = UpdateState.Idle
     }
 
     fun defaultPathsText(): String = DEFAULT_PATHS.joinToString("\n")
