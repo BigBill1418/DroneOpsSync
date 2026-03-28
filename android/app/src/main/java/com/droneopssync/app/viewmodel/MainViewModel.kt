@@ -12,8 +12,11 @@ import com.droneopssync.app.api.GitHubClient
 import com.droneopssync.app.model.DiagLevel
 import com.droneopssync.app.model.DiagLog
 import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.SyncRecord
 import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,12 +48,21 @@ private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/DJI/dji.go.v4/FlightRecord"
 )
 
-private const val PREF_SERVER_URL = "server_url"
-private const val PREF_API_KEY    = "api_key"
-private const val PREF_LOG_PATHS  = "log_paths"
-private const val DEFAULT_SERVER  = "http://10.50.0.5:3080"
+private const val PREF_SERVER_URL   = "server_url"
+private const val PREF_API_KEY      = "api_key"
+private const val PREF_LOG_PATHS    = "log_paths"
+private const val PREF_SYNC_HISTORY = "sync_history"
+private const val DEFAULT_SERVER    = "http://10.50.0.5:3080"
+private const val MAX_HISTORY       = 100
 
 class MainViewModel : ViewModel() {
+
+    // SharedPreferences reference stored on first loadSettings call
+    private var prefs: SharedPreferences? = null
+
+    // ── Sync history ──────────────────────────────────────────────────────────
+    private val _syncHistory = MutableStateFlow<List<SyncRecord>>(emptyList())
+    val syncHistory: StateFlow<List<SyncRecord>> = _syncHistory
 
     // ── Diagnostic log buffer ─────────────────────────────────────────────────
     private val _diagLogs = MutableStateFlow<List<DiagLog>>(emptyList())
@@ -95,7 +107,10 @@ class MainViewModel : ViewModel() {
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState: StateFlow<UpdateState> = _updateState
 
+    private val downloadClient: OkHttpClient by lazy { OkHttpClient() }
+
     fun loadSettings(prefs: SharedPreferences) {
+        this.prefs = prefs
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
 
@@ -113,6 +128,15 @@ class MainViewModel : ViewModel() {
 
         _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
             ?: DEFAULT_PATHS.joinToString("\n")
+
+        // Load persisted sync history
+        val json = prefs.getString(PREF_SYNC_HISTORY, null)
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : TypeToken<List<SyncRecord>>() {}.type
+                _syncHistory.value = Gson().fromJson(json, type) ?: emptyList()
+            } catch (ignored: Exception) {}
+        }
     }
 
     fun saveSettings(
@@ -351,7 +375,26 @@ class MainViewModel : ViewModel() {
                 }
                 if (deletableCount > 0) append(" — tap Delete to clean up controller")
             }
+
+            // Record in sync history
+            if (totalImported + totalSkipped + totalErrors > 0) {
+                val record = SyncRecord(
+                    serverUrl      = url,
+                    filesAttempted = pending.size,
+                    imported       = totalImported,
+                    skipped        = totalSkipped,
+                    errors         = totalErrors
+                )
+                val updated = (_syncHistory.value + record).takeLast(MAX_HISTORY)
+                _syncHistory.value = updated
+                prefs?.edit()?.putString(PREF_SYNC_HISTORY, Gson().toJson(updated))?.apply()
+            }
         }
+    }
+
+    fun clearSyncHistory() {
+        _syncHistory.value = emptyList()
+        prefs?.edit()?.remove(PREF_SYNC_HISTORY)?.apply()
     }
 
     fun retryFailed() {
@@ -360,6 +403,23 @@ class MainViewModel : ViewModel() {
             else it
         }
         _statusMessage.value = "Error files reset to pending — tap SYNC ALL to retry"
+    }
+
+    fun retrySingle(log: FlightLog) {
+        if (log.uploadStatus == UploadStatus.ERROR) {
+            setStatus(log, UploadStatus.PENDING)
+            _statusMessage.value = "${log.name} reset — tap SYNC ALL to retry"
+        }
+    }
+
+    /** Called by ConnectivityManager callback when network becomes available. */
+    fun onNetworkAvailable() {
+        if (_isUploading.value) return
+        if (_logs.value.none { it.uploadStatus == UploadStatus.PENDING }) return
+        if (_serverUrl.value.isBlank() || _apiKey.value.isBlank()) return
+        diag(DiagLevel.INFO, "AUTO", "Network connected — auto-sync triggered")
+        _statusMessage.value = "Network connected — auto-syncing…"
+        uploadAll()
     }
 
     fun deleteSynced() {
@@ -432,9 +492,8 @@ class MainViewModel : ViewModel() {
             _updateState.value = UpdateState.Downloading(0)
             val apkFile = File(cacheDir, "droneopssync-update.apk")
             try {
-                val client = OkHttpClient()
                 val request = Request.Builder().url(state.downloadUrl).build()
-                val response = client.newCall(request).execute()
+                val response = downloadClient.newCall(request).execute()
                 val body = response.body ?: throw IOException("Empty response body")
                 val totalBytes = body.contentLength()
                 apkFile.outputStream().use { out ->

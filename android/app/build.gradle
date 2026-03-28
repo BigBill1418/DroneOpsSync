@@ -72,6 +72,10 @@ android {
         compose true
         buildConfig true
     }
+
+    aaptOptions {
+        cruncherEnabled false
+    }
     // composeOptions block removed — Kotlin 2.x Compose plugin manages the
     // compiler version automatically via org.jetbrains.kotlin.plugin.compose
 }

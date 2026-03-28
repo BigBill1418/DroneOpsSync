@@ -3,6 +3,10 @@ package com.droneopssync.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +26,7 @@ import com.droneopssync.app.ui.screens.DiagScreen
 import com.droneopssync.app.ui.screens.HomeScreen
 import com.droneopssync.app.ui.screens.SettingsScreen
 import com.droneopssync.app.ui.screens.SplashScreen
+import com.droneopssync.app.ui.screens.SyncHistoryScreen
 import com.droneopssync.app.ui.theme.DroneOpsSyncTheme
 import com.droneopssync.app.viewmodel.MainViewModel
 import java.io.File
@@ -33,6 +38,38 @@ class MainActivity : ComponentActivity() {
     // Launcher for READ + WRITE EXTERNAL_STORAGE on Android 9/10
     private val requestStoragePermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* nothing to do */ }
+
+    // Auto-sync when network becomes available (foreground only)
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            viewModel.onNetworkAvailable()
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        cm.registerNetworkCallback(request, networkCallback)
+    }
+
+    private fun unregisterNetworkCallback() {
+        runCatching {
+            getSystemService(ConnectivityManager::class.java)
+                .unregisterNetworkCallback(networkCallback)
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerNetworkCallback()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        unregisterNetworkCallback()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,6 +118,7 @@ class MainActivity : ComponentActivity() {
                             viewModel = viewModel,
                             onNavigateToSettings = { navController.navigate("settings") },
                             onNavigateToDiag = { navController.navigate("diag") },
+                            onNavigateToHistory = { navController.navigate("history") },
                             onInstallUpdate = { apkPath -> installApk(apkPath) }
                         )
                     }
@@ -93,6 +131,12 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("diag") {
                         DiagScreen(
+                            viewModel = viewModel,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("history") {
+                        SyncHistoryScreen(
                             viewModel = viewModel,
                             onBack = { navController.popBackStack() }
                         )
