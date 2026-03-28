@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
 import com.droneopssync.app.ui.theme.*
 import com.droneopssync.app.viewmodel.MainViewModel
@@ -50,19 +52,22 @@ import com.droneopssync.app.viewmodel.MainViewModel
 fun HomeScreen(
     viewModel: MainViewModel,
     onNavigateToSettings: () -> Unit,
-    onNavigateToDiag: () -> Unit = {}
+    onNavigateToDiag: () -> Unit = {},
+    onInstallUpdate: (String) -> Unit = {}
 ) {
     val logs            by viewModel.logs.collectAsState()
     val statusMessage   by viewModel.statusMessage.collectAsState()
     val isUploading     by viewModel.isUploading.collectAsState()
     val serverReachable by viewModel.serverReachable.collectAsState()
     val connectionError by viewModel.connectionError.collectAsState()
+    val updateState     by viewModel.updateState.collectAsState()
 
     val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED }
     val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     // ── Delete confirmation dialog ────────────────────────────────────────────
@@ -131,11 +136,15 @@ fun HomeScreen(
                     hasSynced        = hasSynced,
                     isUploading      = isUploading,
                     logs             = logs,
+                    updateState      = updateState,
                     onRetryConnection = { viewModel.checkServerHealth() },
                     onUploadAll      = { viewModel.uploadAll() },
                     onScanLogs       = { viewModel.scanLogs() },
                     onRetryFailed    = { viewModel.retryFailed() },
-                    onDeleteSynced   = { showDeleteDialog = true }
+                    onDeleteSynced   = { showDeleteDialog = true },
+                    onDownloadUpdate = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
+                    onInstallUpdate  = onInstallUpdate,
+                    onDismissUpdate  = { viewModel.dismissUpdate() }
                 )
             }
 
@@ -196,11 +205,15 @@ fun HomeScreen(
                 hasSynced         = hasSynced,
                 isUploading       = isUploading,
                 logs              = logs,
+                updateState       = updateState,
                 onRetryConnection = { viewModel.checkServerHealth() },
                 onUploadAll       = { viewModel.uploadAll() },
                 onScanLogs        = { viewModel.scanLogs() },
                 onRetryFailed     = { viewModel.retryFailed() },
-                onDeleteSynced    = { showDeleteDialog = true }
+                onDeleteSynced    = { showDeleteDialog = true },
+                onDownloadUpdate  = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
+                onInstallUpdate   = onInstallUpdate,
+                onDismissUpdate   = { viewModel.dismissUpdate() }
             )
 
             StatusBar(statusMessage)
@@ -237,11 +250,15 @@ private fun HeroContent(
     hasSynced: Boolean,
     isUploading: Boolean,
     logs: List<FlightLog>,
+    updateState: UpdateState,
     onRetryConnection: () -> Unit,
     onUploadAll: () -> Unit,
     onScanLogs: () -> Unit,
     onRetryFailed: () -> Unit,
-    onDeleteSynced: () -> Unit
+    onDeleteSynced: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: (String) -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -259,6 +276,35 @@ private fun HeroContent(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         BrandLogo()
+
+        // ── OTA update banner ─────────────────────────────────────────────────
+        when (val us = updateState) {
+            is UpdateState.Available -> {
+                Spacer(Modifier.height(12.dp))
+                UpdateBanner(
+                    message = "Update v${us.version} available",
+                    actionLabel = "DOWNLOAD",
+                    color = DocCyan,
+                    onClick = onDownloadUpdate,
+                    onDismiss = onDismissUpdate
+                )
+            }
+            is UpdateState.Downloading -> {
+                Spacer(Modifier.height(12.dp))
+                UpdateProgressBanner(progress = us.progress)
+            }
+            is UpdateState.ReadyToInstall -> {
+                Spacer(Modifier.height(12.dp))
+                UpdateBanner(
+                    message = "Update downloaded — tap to install",
+                    actionLabel = "INSTALL",
+                    color = DocGreen,
+                    onClick = { onInstallUpdate(us.apkPath) },
+                    onDismiss = onDismissUpdate
+                )
+            }
+            else -> {}
+        }
 
         Spacer(Modifier.height(26.dp))
 
@@ -428,6 +474,89 @@ private fun HeroContent(
                     fontSize = 13.sp
                 )
             }
+        }
+    }
+}
+
+// ── OTA update banner components ──────────────────────────────────────────────
+@Composable
+private fun UpdateBanner(
+    message: String,
+    actionLabel: String,
+    color: Color,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth(0.82f),
+        shape = RoundedCornerShape(8.dp),
+        color = color.copy(alpha = 0.12f),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.SystemUpdate,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = message,
+                color = color,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = actionLabel,
+                color = color,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(onClick = onClick)
+            )
+            Spacer(Modifier.width(10.dp))
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Dismiss",
+                tint = color.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .size(16.dp)
+                    .clickable(onClick = onDismiss)
+            )
+        }
+    }
+}
+
+@Composable
+private fun UpdateProgressBanner(progress: Int) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(0.82f),
+        shape = RoundedCornerShape(8.dp),
+        color = DocCyan.copy(alpha = 0.10f)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.CloudDownload,
+                    contentDescription = null,
+                    tint = DocCyan,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Downloading update… $progress%", color = DocCyan, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth(),
+                color = DocCyan,
+                trackColor = DocSurface
+            )
         }
     }
 }
