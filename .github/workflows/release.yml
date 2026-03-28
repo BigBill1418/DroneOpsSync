@@ -33,15 +33,23 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Build debug APK
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/app/keystore/droneopssync.keystore
+
+      - name: Build APK
+        env:
+          KEYSTORE_PATH: keystore/droneopssync.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: droneopssync
         run: |
           cd android
           chmod +x gradlew
-          bash gradlew assembleDebug --no-daemon
+          bash gradlew assembleRelease --no-daemon
 
       - name: Rename APK
         run: |
-          mv android/app/build/outputs/apk/debug/app-debug.apk \
+          mv android/app/build/outputs/apk/release/app-release.apk \
              DroneOpsSync-v${{ steps.version.outputs.name }}.apk
 
       - name: Create GitHub release
