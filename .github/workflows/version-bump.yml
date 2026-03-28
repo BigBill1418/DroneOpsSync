@@ -22,8 +22,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Skip if already a version bump commit
+        id: guard
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          if echo "$MSG" | grep -qi "bump version"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Read current version
         id: read
+        if: steps.guard.outputs.skip == 'false'
         run: |
           VERSION=$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)
           echo "current=$VERSION" >> $GITHUB_OUTPUT
@@ -35,10 +46,12 @@ jobs:
           echo "new=$NEW" >> $GITHUB_OUTPUT
 
       - name: Write new version
+        if: steps.guard.outputs.skip == 'false'
         run: |
           sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${{ steps.read.outputs.new }}/" android/version.properties
 
       - name: Commit and push
+        if: steps.guard.outputs.skip == 'false'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: bump version to ${{ steps.read.outputs.new }} [skip ci]"
