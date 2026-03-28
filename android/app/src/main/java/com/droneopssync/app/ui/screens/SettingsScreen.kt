@@ -161,7 +161,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    "One path per line. Only .txt files are scanned. Paths that don't exist are silently skipped.",
+                    "One path per line. Scans .txt, .log, .csv, and .json files. Paths that don't exist are silently skipped.",
                     color = DocMuted,
                     fontSize = 13.sp
                 )
@@ -191,7 +191,7 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text("How it works", color = DocCyan, fontWeight = FontWeight.Bold)
-                    Text("1. Tap SCAN FOR LOGS — finds .txt flight records in configured paths", color = DocMuted, fontSize = 13.sp)
+                    Text("1. Tap SCAN FOR LOGS — finds .txt / .log / .csv / .json flight records in configured paths", color = DocMuted, fontSize = 13.sp)
                     Text("2. Tap SYNC ALL — uploads logs to DroneOpsCommand over LAN or VPN", color = DocMuted, fontSize = 13.sp)
                     Text("3. Tap DELETE — removes synced files from this controller only", color = DocMuted, fontSize = 13.sp)
                     Spacer(Modifier.height(4.dp))
