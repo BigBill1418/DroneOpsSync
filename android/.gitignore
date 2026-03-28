@@ -1,0 +1,12 @@
+# Local machine properties — never commit
+local.properties
+
+# Gradle caches
+.gradle/
+
+# Build outputs
+app/build/
+
+# IntelliJ / Android Studio
+*.iml
+.idea/

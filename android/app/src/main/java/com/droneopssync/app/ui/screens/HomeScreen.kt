@@ -205,6 +205,9 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = onNavigateToDiag) {
+                    Icon(Icons.Outlined.BugReport, contentDescription = "Diagnostics", tint = DocMuted)
+                }
                 IconButton(onClick = onNavigateToSettings) {
                     Icon(Icons.Default.Settings, contentDescription = "Settings", tint = DocMuted)
                 }
