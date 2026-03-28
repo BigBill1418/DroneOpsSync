@@ -45,11 +45,11 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          bash gradlew assembleRelease --no-daemon
+          bash gradlew assembleDebug --no-daemon
 
       - name: Rename APK
         run: |
-          mv android/app/build/outputs/apk/release/app-release.apk \
+          mv android/app/build/outputs/apk/debug/app-debug.apk \
              DroneOpsSync-v${{ steps.version.outputs.name }}.apk
 
       - name: Create GitHub release
