@@ -2,12 +2,14 @@ package com.droneopssync.app.ui.screens
 
 import android.content.res.Configuration
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -27,8 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -676,12 +682,7 @@ private fun ReadyToSyncBadge(serverReachable: Boolean?) {
 @Composable
 private fun BrandLogo() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(
-            Icons.Default.Flight,
-            contentDescription = null,
-            tint = DocOrange,
-            modifier = Modifier.size(56.dp)
-        )
+        AnimatedDroneIcon(color = DocOrange, modifier = Modifier.size(56.dp))
         Spacer(Modifier.height(10.dp))
         Text(
             buildAnnotatedString {
@@ -780,5 +781,76 @@ private fun LogFileCard(log: FlightLog) {
                 )
             }
         }
+    }
+}
+
+// ── Animated drone icon ───────────────────────────────────────────────────────
+@Composable
+private fun AnimatedDroneIcon(color: Color, modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "drone")
+
+    // Propeller spin — fast continuous rotation
+    val propAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(320, easing = LinearEasing), RepeatMode.Restart),
+        label = "propSpin"
+    )
+
+    // Gentle hover float
+    val floatY by infiniteTransition.animateFloat(
+        initialValue = -2.5f,
+        targetValue = 2.5f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
+        label = "hover"
+    )
+
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2
+        val cy = size.height / 2 + floatY
+        // Diagonal arm reach from center to propeller hub
+        val arm   = size.minDimension * 0.295f
+        val diag  = arm * 0.7071f          // arm * cos(45°)
+        val bodyR = size.minDimension * 0.115f
+        val propRx = size.minDimension * 0.152f
+        val propRy = size.minDimension * 0.050f
+        val sw    = size.minDimension * 0.070f
+
+        // Four arm tips (NE, NW, SW, SE)
+        val tips = listOf(
+            Offset(cx + diag, cy - diag),
+            Offset(cx - diag, cy - diag),
+            Offset(cx - diag, cy + diag),
+            Offset(cx + diag, cy + diag)
+        )
+
+        // Arms
+        tips.forEach { tip ->
+            drawLine(color, Offset(cx, cy), tip, sw, StrokeCap.Round)
+        }
+
+        // Spinning propeller ellipses
+        tips.forEach { tip ->
+            rotate(propAngle, tip) {
+                drawOval(
+                    color = color.copy(alpha = 0.88f),
+                    topLeft = Offset(tip.x - propRx, tip.y - propRy),
+                    size = Size(propRx * 2, propRy * 2),
+                    style = Stroke(width = sw * 0.72f)
+                )
+            }
+        }
+
+        // Body
+        drawCircle(color, bodyR, Offset(cx, cy))
+
+        // Landing gear
+        val legX   = bodyR * 0.88f
+        val legTop = cy + bodyR
+        val legBot = legTop + bodyR * 0.78f
+        listOf(-legX, legX).forEach { xOff ->
+            drawLine(color, Offset(cx + xOff, legTop), Offset(cx + xOff, legBot), sw * 0.58f, StrokeCap.Round)
+        }
+        drawLine(color, Offset(cx - legX, legBot), Offset(cx + legX, legBot), sw * 0.58f, StrokeCap.Round)
     }
 }
