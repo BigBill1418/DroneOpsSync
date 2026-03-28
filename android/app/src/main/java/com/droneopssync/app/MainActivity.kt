@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
         viewModel.loadSettings(prefs)
         viewModel.checkServerHealth()
         viewModel.checkForUpdate()
+        viewModel.startAutoFlow()
 
         setContent {
             DroneOpsSyncTheme {

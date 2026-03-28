@@ -72,10 +72,19 @@ fun HomeScreen(
     val connectionError by viewModel.connectionError.collectAsState()
     val updateState     by viewModel.updateState.collectAsState()
 
-    val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
-    val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
-    val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
+    val hasPending   = logs.any { it.uploadStatus == UploadStatus.PENDING }
+    val hasSynced    = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
+    val hasErrors    = logs.any { it.uploadStatus == UploadStatus.ERROR }
+    val promptDelete by viewModel.promptDelete.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // Auto-show delete dialog when ViewModel signals after upload completes
+    LaunchedEffect(promptDelete) {
+        if (promptDelete) {
+            showDeleteDialog = true
+            viewModel.dismissDeletePrompt()
+        }
+    }
 
     val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
