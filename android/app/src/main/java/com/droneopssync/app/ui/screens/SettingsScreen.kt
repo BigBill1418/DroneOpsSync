@@ -4,11 +4,14 @@ import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -22,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droneopssync.app.BuildConfig
+import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.ui.theme.*
 import com.droneopssync.app.viewmodel.MainViewModel
 
@@ -35,6 +39,7 @@ fun SettingsScreen(
     val currentServerUrl by viewModel.serverUrl.collectAsState()
     val currentApiKey    by viewModel.apiKey.collectAsState()
     val currentLogPaths  by viewModel.logPathsText.collectAsState()
+    val updateState      by viewModel.updateState.collectAsState()
 
     var serverUrl by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
     var apiKey    by remember(currentApiKey)    { mutableStateOf(currentApiKey) }
@@ -196,6 +201,76 @@ fun SettingsScreen(
                     Text("3. Tap DELETE — removes synced files from this controller only", color = DocMuted, fontSize = 13.sp)
                     Spacer(Modifier.height(4.dp))
                     Text("Files are never deleted automatically — you must confirm.", color = DocRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            HorizontalDivider(color = DocDivider)
+
+            // ── App update ────────────────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("App Update", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+                val isChecking = updateState is UpdateState.Checking
+                OutlinedButton(
+                    onClick = { viewModel.checkForUpdate() },
+                    enabled = !isChecking,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.5.dp,
+                        if (isChecking) DocMuted.copy(alpha = 0.3f) else DocCyan.copy(alpha = 0.6f)
+                    )
+                ) {
+                    if (isChecking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = DocCyan,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Checking…", color = DocMuted)
+                    } else {
+                        Icon(
+                            Icons.Default.SystemUpdate,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = DocCyan
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("CHECK FOR UPDATES", color = DocCyan, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                    }
+                }
+
+                when (val us = updateState) {
+                    is UpdateState.UpToDate -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DocGreen, modifier = Modifier.size(18.dp))
+                            Text("Connected — app is up to date", color = DocGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    is UpdateState.Available -> {
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = DocCyan.copy(alpha = 0.10f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DocCyan, modifier = Modifier.size(18.dp))
+                                Text(
+                                    "Update v${us.version} available — return to home screen to download",
+                                    color = DocCyan,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                    else -> {}
                 }
             }
 
