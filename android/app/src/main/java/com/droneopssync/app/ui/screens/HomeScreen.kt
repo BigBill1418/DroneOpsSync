@@ -319,6 +319,10 @@ private fun HeroContent(
                     onDismiss = onDismissUpdate
                 )
             }
+            is UpdateState.UpToDate -> {
+                Spacer(Modifier.height(12.dp))
+                UpToDateBanner(onDismiss = onDismissUpdate)
+            }
             else -> {}
         }
 
@@ -572,6 +576,48 @@ private fun UpdateProgressBanner(progress: Int) {
                 modifier = Modifier.fillMaxWidth(),
                 color = DocCyan,
                 trackColor = DocSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun UpToDateBanner(onDismiss: () -> Unit) {
+    // Auto-dismiss after 4 seconds
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(4_000)
+        onDismiss()
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(0.82f),
+        shape = RoundedCornerShape(8.dp),
+        color = DocGreen.copy(alpha = 0.10f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = DocGreen,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "App is up to date",
+                color = DocGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(10.dp))
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Dismiss",
+                tint = DocGreen.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .size(16.dp)
+                    .clickable(onClick = onDismiss)
             )
         }
     }
