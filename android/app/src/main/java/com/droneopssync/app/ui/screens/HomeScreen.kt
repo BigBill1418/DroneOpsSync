@@ -63,7 +63,7 @@ fun HomeScreen(
     val updateState     by viewModel.updateState.collectAsState()
 
     val hasPending  = logs.any { it.uploadStatus == UploadStatus.PENDING }
-    val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED }
+    val hasSynced   = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
     val hasErrors   = logs.any { it.uploadStatus == UploadStatus.ERROR }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -77,10 +77,17 @@ fun HomeScreen(
             containerColor = DocPanel,
             title = { Text("Confirm Delete", color = DocWhite, fontWeight = FontWeight.Bold) },
             text = {
-                val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
+                val syncedCount = logs.count { it.uploadStatus == UploadStatus.SYNCED }
+                val dupCount    = logs.count { it.uploadStatus == UploadStatus.DUPLICATE }
+                val total       = syncedCount + dupCount
+                val breakdown   = buildString {
+                    if (syncedCount > 0) append("$syncedCount just synced")
+                    if (syncedCount > 0 && dupCount > 0) append(", ")
+                    if (dupCount > 0) append("$dupCount already on server")
+                }
                 Text(
-                    "Delete $count synced file(s) from this controller?\n\n" +
-                    "Files are confirmed in DroneOpsCommand — this cannot be undone.",
+                    "Delete $total file(s) from this controller?\n($breakdown)\n\n" +
+                    "All files are confirmed in DroneOpsCommand — this cannot be undone.",
                     color = DocMuted
                 )
             },
@@ -466,9 +473,9 @@ private fun HeroContent(
             ) {
                 Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                val count = logs.count { it.uploadStatus == UploadStatus.SYNCED }
+                val count = logs.count { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
                 Text(
-                    "DELETE $count SYNCED FILE(S)",
+                    "DELETE $count CONFIRMED FILE(S)",
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp,
                     fontSize = 13.sp
