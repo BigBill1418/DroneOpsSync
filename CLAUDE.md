@@ -37,31 +37,48 @@ CI takes it from there: bump → build → publish release automatically.
 **Navigation** (`MainActivity`)
 - Routes: `splash` → `home` → `settings` / `diag` / `history`
 - `ConnectivityManager.NetworkCallback` registered in `onStart`/`onStop` for foreground auto-sync
+- `startAutoFlow()` called on launch — scans, waits for health check, uploads if server reachable
 
 **ViewModel** (`MainViewModel`)
 - All network calls on `Dispatchers.IO`
 - `StateFlow` for all UI state; no LiveData
 - `SharedPreferences` reference stored on first `loadSettings()` call
 - Sync history persisted as JSON (Gson) under `PREF_SYNC_HISTORY`; capped at 100 records
+- `_isScanning: MutableStateFlow<Boolean>` — drives pull-to-refresh indicator
+- `_autoSyncEnabled: MutableStateFlow<Boolean>` — persisted under `PREF_AUTO_SYNC`; gates both `startAutoFlow()` and `onNetworkAvailable()`
+- `_promptDelete: MutableStateFlow<Boolean>` — one-shot signal; `HomeScreen` observes via `LaunchedEffect` to auto-show delete dialog
 
 **Key features**
 | Feature | Entry point |
 |---------|-------------|
-| Scan flight logs | `scanLogs()` — `.txt .log .csv .json` from configured paths |
-| Upload to server | `uploadAll()` — multipart POST, per-file status, abort on auth failure |
-| Per-file retry | Long-press any ERROR card → `retrySingle(log)` |
-| Delete confirmed files | `deleteSynced()` — SYNCED + DUPLICATE |
+| Auto-flow on launch | `startAutoFlow()` — scan → wait for health check → upload → prompt delete |
+| Scan flight logs | `scanLogs()` / `performScan()` — `.txt .log .csv .json` from configured paths |
+| Pull-to-refresh | Drag down on log list → re-scan; driven by `isScanning` StateFlow |
+| Upload to server | `uploadAll()` / `performUpload()` — multipart POST, per-file status, abort on auth failure |
+| Per-file retry | Long-press **or** swipe right on any ERROR card → `retrySingle(log)` |
+| Haptic feedback | `HapticFeedbackType.LongPress` on both long-press and swipe-retry |
+| Delete confirmed files | `deleteSynced()` — SYNCED + DUPLICATE; auto-prompted after upload |
 | Sync history | `SyncHistoryScreen` — persistent, sorted newest-first, clearable |
-| Auto-sync | `onNetworkAvailable()` — fires when network connects (foreground only) |
+| Auto-sync on connect | `onNetworkAvailable()` — fires when network connects (foreground only) |
+| Auto-sync toggle | Settings → Auto Sync — disables launch auto-flow and network-connect sync |
 | OTA update | `checkForUpdate()` + `downloadUpdate()` → `PackageReplacedReceiver` auto-relaunches |
 | Diagnostics | `DiagScreen` — real-time log buffer, share/clear |
 
 **Screens**
-- `HomeScreen` — drone animation, status badge, scan/sync/delete buttons, OTA banner, log list
-- `SettingsScreen` — server URL, API key, log paths, manual update check
+- `HomeScreen` — drone animation, status badge, scan/sync/delete buttons, OTA banner, pull-to-refresh log list with swipe-to-retry
+- `SettingsScreen` — server URL, API key, log paths, auto-sync toggle, manual update check
 - `SyncHistoryScreen` — past upload sessions with colour-coded results
 - `DiagScreen` — low-level network/scan/upload log
 - `SplashScreen` — 1.6 s animated intro
+
+**Permissions**
+- `INTERNET` — upload and OTA
+- `ACCESS_NETWORK_STATE` — `ConnectivityManager` callback for auto-sync on connect
+- Android 11+: `MANAGE_EXTERNAL_STORAGE` (All Files Access) — required to read DJI log paths
+- Android ≤10: `READ_EXTERNAL_STORAGE` + `WRITE_EXTERNAL_STORAGE`
+
+**Remote access**
+The server URL accepts any reachable address — LAN IP, WireGuard peer IP, or a public HTTPS endpoint. The app makes plain HTTP/S POST requests; transport security is handled at the network layer (WireGuard VPN or TLS termination on the server). No app changes are required to switch between local and remote access — update the server URL in Settings.
 
 **CI/CD** (`.github/workflows/`)
 - `version-bump.yml` — triggers on `push` to `main` matching `android/**`; guard prevents double-bump
