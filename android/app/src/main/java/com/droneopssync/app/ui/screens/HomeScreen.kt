@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.hapticfeedback.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -71,6 +73,7 @@ fun HomeScreen(
     val serverReachable by viewModel.serverReachable.collectAsState()
     val connectionError by viewModel.connectionError.collectAsState()
     val updateState     by viewModel.updateState.collectAsState()
+    val isScanning      by viewModel.isScanning.collectAsState()
 
     val hasPending   = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced    = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
@@ -188,18 +191,24 @@ fun HomeScreen(
                 StatusBar(statusMessage)
                 HorizontalDivider(color = DocDivider, thickness = 1.dp)
 
-                if (logs.isEmpty()) {
-                    EmptyState(modifier = Modifier.weight(1f))
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(logs, key = { it.file.absolutePath }) { log ->
-                            LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
+                PullToRefreshBox(
+                    isRefreshing = isScanning,
+                    onRefresh = { viewModel.scanLogs() },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (logs.isEmpty()) {
+                        EmptyState(modifier = Modifier.fillMaxSize())
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(logs, key = { it.file.absolutePath }) { log ->
+                                LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
+                            }
                         }
                     }
                 }
@@ -254,18 +263,24 @@ fun HomeScreen(
             StatusBar(statusMessage)
             HorizontalDivider(color = DocDivider, thickness = 1.dp)
 
-            if (logs.isEmpty()) {
-                EmptyState(modifier = Modifier.weight(1f))
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(logs, key = { it.file.absolutePath }) { log ->
-                        LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
+            PullToRefreshBox(
+                isRefreshing = isScanning,
+                onRefresh = { viewModel.scanLogs() },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (logs.isEmpty()) {
+                    EmptyState(modifier = Modifier.fillMaxSize())
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(logs, key = { it.file.absolutePath }) { log ->
+                            LogFileCard(log, onRetry = { viewModel.retrySingle(log) })
+                        }
                     }
                 }
             }
@@ -789,9 +804,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 // ── Log file card ─────────────────────────────────────────────────────────────
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun LogFileCard(log: FlightLog, onRetry: () -> Unit = {}) {
+    val haptic = LocalHapticFeedback.current
     val (statusColor, statusLabel, statusIcon) = when (log.uploadStatus) {
         UploadStatus.PENDING   -> Triple(DocMuted,    "PENDING",   Icons.Default.Schedule)
         UploadStatus.UPLOADING -> Triple(DocAmber,    "SYNCING",   Icons.Default.CloudUpload)
@@ -802,59 +818,93 @@ private fun LogFileCard(log: FlightLog, onRetry: () -> Unit = {}) {
     }
     val canRetry = log.uploadStatus == UploadStatus.ERROR
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = {},
-                onLongClick = if (canRetry) onRetry else null,
-                onLongClickLabel = if (canRetry) "Retry this file" else null
-            ),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = DocPanel),
-        border = BorderStroke(1.dp, if (canRetry) DocRed.copy(alpha = 0.4f) else DocSurface)
+    // Swipe right to retry — snaps back; card stays in list with updated status
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.StartToEnd && canRetry) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onRetry()
+            }
+            false // always snap back
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = canRetry,
+        enableDismissFromEndToStart = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(DocAmber.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    .padding(start = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Replay, contentDescription = null, tint = DocAmber, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Retry", color = DocAmber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
     ) {
-        Row(
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = if (canRetry) {
+                        { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onRetry() }
+                    } else null,
+                    onLongClickLabel = if (canRetry) "Retry this file" else null
+                ),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = DocPanel),
+            border = BorderStroke(1.dp, if (canRetry) DocRed.copy(alpha = 0.4f) else DocSurface)
         ) {
-            Icon(
-                imageVector = statusIcon,
-                contentDescription = statusLabel,
-                tint = statusColor,
-                modifier = Modifier.size(26.dp)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = log.name,
-                    color = DocWhite,
-                    fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "${log.dateFormatted}  ·  ${log.sizeFormatted}",
-                    color = DocMuted,
-                    fontSize = 11.sp
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = statusColor.copy(alpha = 0.12f)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = statusLabel,
-                    color = statusColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                Icon(
+                    imageVector = statusIcon,
+                    contentDescription = statusLabel,
+                    tint = statusColor,
+                    modifier = Modifier.size(26.dp)
                 )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = log.name,
+                        color = DocWhite,
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "${log.dateFormatted}  ·  ${log.sizeFormatted}",
+                        color = DocMuted,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = statusColor.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = statusLabel,
+                        color = statusColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
     }
