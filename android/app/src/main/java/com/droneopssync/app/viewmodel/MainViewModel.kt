@@ -53,6 +53,7 @@ private const val PREF_SERVER_URL   = "server_url"
 private const val PREF_API_KEY      = "api_key"
 private const val PREF_LOG_PATHS    = "log_paths"
 private const val PREF_SYNC_HISTORY = "sync_history"
+private const val PREF_AUTO_SYNC    = "auto_sync_enabled"
 private const val DEFAULT_SERVER    = "http://10.50.0.5:3080"
 private const val MAX_HISTORY       = 100
 
@@ -70,6 +71,19 @@ class MainViewModel : ViewModel() {
     val promptDelete: StateFlow<Boolean> = _promptDelete
 
     fun dismissDeletePrompt() { _promptDelete.value = false }
+
+    // ── Auto-sync toggle ──────────────────────────────────────────────────────
+    private val _autoSyncEnabled = MutableStateFlow(true)
+    val autoSyncEnabled: StateFlow<Boolean> = _autoSyncEnabled
+
+    fun setAutoSync(enabled: Boolean, prefs: SharedPreferences) {
+        _autoSyncEnabled.value = enabled
+        prefs.edit().putBoolean(PREF_AUTO_SYNC, enabled).apply()
+    }
+
+    // ── Scan progress (drives pull-to-refresh indicator) ─────────────────────
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning
 
     // ── Diagnostic log buffer ─────────────────────────────────────────────────
     private val _diagLogs = MutableStateFlow<List<DiagLog>>(emptyList())
@@ -146,6 +160,8 @@ class MainViewModel : ViewModel() {
                 _syncHistory.value = Gson().fromJson(json, type) ?: emptyList()
             } catch (ignored: Exception) {}
         }
+
+        _autoSyncEnabled.value = prefs.getBoolean(PREF_AUTO_SYNC, true)
     }
 
     fun saveSettings(
@@ -225,9 +241,12 @@ class MainViewModel : ViewModel() {
 
     // ── Scan ──────────────────────────────────────────────────────────────────
 
-    /** Manual scan — fire and forget. */
+    /** Manual scan — fire and forget. Also drives the pull-to-refresh indicator. */
     fun scanLogs() {
-        viewModelScope.launch(Dispatchers.IO) { performScan() }
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            try { performScan() } finally { _isScanning.value = false }
+        }
     }
 
     /**
@@ -430,8 +449,10 @@ class MainViewModel : ViewModel() {
      */
     fun startAutoFlow() {
         viewModelScope.launch(Dispatchers.IO) {
-            val found = performScan()
+            _isScanning.value = true
+            val found = try { performScan() } finally { _isScanning.value = false }
             if (found == 0) return@launch
+            if (!_autoSyncEnabled.value) return@launch  // respect the toggle
 
             val url = _serverUrl.value
             val key = _apiKey.value
@@ -454,6 +475,7 @@ class MainViewModel : ViewModel() {
 
     /** Called by ConnectivityManager.NetworkCallback when network becomes available. */
     fun onNetworkAvailable() {
+        if (!_autoSyncEnabled.value) return
         if (_isUploading.value) return
         if (_logs.value.none { it.uploadStatus == UploadStatus.PENDING }) return
         if (_serverUrl.value.isBlank() || _apiKey.value.isBlank()) return

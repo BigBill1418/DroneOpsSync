@@ -36,10 +36,11 @@ fun SettingsScreen(
     prefs: SharedPreferences,
     onBack: () -> Unit
 ) {
-    val currentServerUrl by viewModel.serverUrl.collectAsState()
-    val currentApiKey    by viewModel.apiKey.collectAsState()
-    val currentLogPaths  by viewModel.logPathsText.collectAsState()
-    val updateState      by viewModel.updateState.collectAsState()
+    val currentServerUrl  by viewModel.serverUrl.collectAsState()
+    val currentApiKey     by viewModel.apiKey.collectAsState()
+    val currentLogPaths   by viewModel.logPathsText.collectAsState()
+    val updateState       by viewModel.updateState.collectAsState()
+    val autoSyncEnabled   by viewModel.autoSyncEnabled.collectAsState()
 
     var serverUrl by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
     var apiKey    by remember(currentApiKey)    { mutableStateOf(currentApiKey) }
@@ -185,6 +186,43 @@ fun SettingsScreen(
                         cursorColor          = DocCyan
                     )
                 )
+            }
+
+            HorizontalDivider(color = DocDivider)
+
+            // ── Auto Sync ─────────────────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Auto Sync", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            if (autoSyncEnabled) "Enabled" else "Disabled",
+                            color = if (autoSyncEnabled) DocGreen else DocMuted,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            "Scan and upload automatically on launch and when network connects",
+                            color = DocMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Switch(
+                        checked = autoSyncEnabled,
+                        onCheckedChange = { viewModel.setAutoSync(it, prefs) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = DocDeep,
+                            checkedTrackColor = DocGreen,
+                            uncheckedThumbColor = DocMuted,
+                            uncheckedTrackColor = DocSurface
+                        )
+                    )
+                }
             }
 
             HorizontalDivider(color = DocDivider)
