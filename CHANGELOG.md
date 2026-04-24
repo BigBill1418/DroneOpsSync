@@ -4,7 +4,9 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
-### Planned for v1.3.24 (see `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`)
+## [1.3.24] — 2026-04-24
+
+Shipped via CI run `24904726954` on BOS-HQ self-hosted runner. APK signed with same keystore as v1.3.23 (cert fingerprint `7406a246...`) → OTA-upgrade-compatible, zero sideload. Plan: `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`. See ADR-0001 for the Kotlin resumption context.
 
 - HTTPS coercion for public server URLs (silent upgrade of `http://public.host` → `https://public.host`; LAN hosts on `http://` preserved). Ported from DroneOpsCommand companion commit `890b875`.
 - Default server URL pre-baked to `https://droneops.barnardhq.com` (mirrors companion v2.62.0 default).
