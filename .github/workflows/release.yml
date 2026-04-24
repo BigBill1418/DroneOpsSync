@@ -64,6 +64,15 @@ jobs:
           mv android/app/build/outputs/apk/release/app-release.apk \
              "DroneOpsSync-v${VERSION_NAME}.apk"
 
+      - name: Put Android build-tools on PATH
+        run: |
+          BT_DIR="$ANDROID_HOME/build-tools/33.0.2"
+          if [ ! -d "$BT_DIR" ]; then
+            echo "::error::Android build-tools 33.0.2 not found at $BT_DIR"
+            exit 1
+          fi
+          echo "$BT_DIR" >> "$GITHUB_PATH"
+
       - name: Verify APK signature (fingerprint must match v1.3.23's cert)
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
