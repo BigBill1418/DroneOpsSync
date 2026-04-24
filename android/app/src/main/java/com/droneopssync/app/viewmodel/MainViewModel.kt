@@ -18,7 +18,10 @@ import com.droneopssync.app.model.UploadStatus
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -74,6 +77,19 @@ class MainViewModel : ViewModel() {
     val promptDelete: StateFlow<Boolean> = _promptDelete
 
     fun dismissDeletePrompt() { _promptDelete.value = false }
+
+    // ── ADR-0002 zero-touch key rotation: one-shot toast events ──────────────
+    // SharedFlow with replay=0 + buffer=1 + DROP_OLDEST: a toast emitted while
+    // no collector is attached is dropped (don't spam the user the next time
+    // HomeScreen mounts). Pattern matches the existing one-shot UI signal
+    // shape (e.g. _promptDelete) but using a flow because each emission is
+    // distinct content rather than a sticky boolean.
+    private val _toastEvents = MutableSharedFlow<String>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val toastEvents: SharedFlow<String> = _toastEvents
 
     // ── Auto-sync toggle ──────────────────────────────────────────────────────
     private val _autoSyncEnabled = MutableStateFlow(true)
@@ -177,12 +193,20 @@ class MainViewModel : ViewModel() {
      * Runs BEFORE every upload attempt. On failure, returns a classified
      * [PreflightResult.Fail] so callers render a specific banner instead of
      * silently retrying. Ported from companion v2.62.1's `preflightHealth()`.
+     *
+     * On success, additionally inspects the response body for an ADR-0003
+     * `rotated_key` hint. If the server rotated this device's API key
+     * server-side, the controller picks up the new key here — zero
+     * operator interaction on the device. See [maybeApplyRotatedKey].
      */
     private suspend fun preflightHealth(url: String, apiKey: String): PreflightResult {
         return try {
             val response = ApiClient.create(url).deviceHealth(apiKey)
             when {
-                response.isSuccessful -> PreflightResult.Ok
+                response.isSuccessful -> {
+                    maybeApplyRotatedKey(currentKey = apiKey, body = response.body())
+                    PreflightResult.Ok
+                }
                 response.code() == 401 -> PreflightResult.Fail(
                     "invalid_key",
                     401,
@@ -213,6 +237,58 @@ class MainViewModel : ViewModel() {
                 "Network error reaching $url: ${e.message?.take(120)}"
             )
         }
+    }
+
+    // ── ADR-0003 zero-touch device API key rotation pickup ───────────────────
+    //
+    // Server returns `rotated_key` + `rotation_grace_until` ONLY when the
+    // request authenticated via the OLD key during a 24h grace window. If
+    // we see a sane new key, persist it to SharedPreferences, invalidate
+    // the cached Retrofit service so the next call uses the new header,
+    // and emit a one-shot toast so the operator sees confirmation. Bad
+    // payloads are logged WARN and ignored — never overwrite a working
+    // key with garbage.
+    //
+    // Validation rules — fail-safe by default:
+    //   - missing field         → no-op (steady-state path)
+    //   - empty string          → no-op (defensive; server should never)
+    //   - prefix mismatch       → WARN + no-op
+    //   - length < 40           → WARN + no-op
+    //   - same as current key   → no-op (server idempotency / our own key)
+    private companion object {
+        const val ROTATED_KEY_PREFIX = "doc_"
+        const val ROTATED_KEY_MIN_LENGTH = 40
+    }
+
+    private fun maybeApplyRotatedKey(
+        currentKey: String,
+        body: com.droneopssync.app.model.DeviceHealthResponse?,
+    ) {
+        val newKey = body?.rotatedKey ?: return
+        if (newKey.isEmpty()) return
+        if (newKey == currentKey) return  // idempotent — server echoed our key
+
+        if (!newKey.startsWith(ROTATED_KEY_PREFIX) ||
+            newKey.length < ROTATED_KEY_MIN_LENGTH) {
+            diag(
+                DiagLevel.WARN,
+                "ROTATE",
+                "Ignoring malformed rotated_key payload (prefix or length mismatch); keeping current key",
+            )
+            return
+        }
+
+        val grace = body.rotationGraceUntil
+        prefs?.edit()?.putString(PREF_API_KEY, newKey)?.apply()
+        _apiKey.value = newKey
+        ApiClient.invalidate()
+        refreshPairing()
+        diag(
+            DiagLevel.INFO,
+            "ROTATE",
+            "API key auto-rotated from server hint; grace expires at $grace",
+        )
+        _toastEvents.tryEmit("API key auto-updated")
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────

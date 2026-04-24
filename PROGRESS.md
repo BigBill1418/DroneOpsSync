@@ -2,6 +2,29 @@
 
 Session-by-session notes. Most recent first.
 
+## 2026-04-24 EVENING — Zero-touch key rotation client (aegis; v1.3.25 PR)
+
+Branch `claude/auto-rotation-client` opened against `main`. Paired with DroneOpsCommand v2.63.6 (ADR-0003).
+
+### Completed
+
+- **Typed model.** New `DeviceHealthResponse` (`android/app/src/main/java/com/droneopssync/app/model/DeviceHealthResponse.kt`) with Gson `@SerializedName` fields for `status`, `device_label`, `parser_available`, `upload_endpoint`, `rotated_key`, `rotation_grace_until`. Forward-compatible — Gson ignores unknown fields.
+- **Service signature.** `DroneOpsSyncService.deviceHealth` now returns `Response<DeviceHealthResponse>` instead of `Response<Map<String, Any>>`. Body is read on success path only.
+- **ViewModel pickup.** `MainViewModel.maybeApplyRotatedKey` validates prefix `doc_` + length ≥ 40 + non-empty + not-equal-to-current; on a valid payload writes `PREF_API_KEY`, sets `_apiKey.value`, calls `ApiClient.invalidate()`, refreshes pairing, and emits the one-shot toast.
+- **Toast SharedFlow.** New `_toastEvents` (replay=0, buffer=1, DROP_OLDEST) + `toastEvents: SharedFlow<String>` exposed publicly.
+- **HomeScreen toast wiring.** `LaunchedEffect(Unit) { viewModel.toastEvents.collect { ... } }` displays via `android.widget.Toast.makeText(...).show()`. No SnackbarHost — the app's scaffold has none.
+- **Unit tests.** `android/app/src/test/java/com/droneopssync/app/api/KeyRotationParseTest.kt`, 6 tests (full payload, absent hint, unknown fields, empty key, status-only, prefix/length contract). All green via `./gradlew :app:testDebugUnitTest`.
+- **Test infrastructure.** Added `testImplementation 'junit:junit:4.13.2'` + `testImplementation 'com.google.code.gson:gson:2.11.0'` to `app/build.gradle`. Bootstraps `android/app/src/test/` (previously absent).
+- **Docs.** ADR-0002 created. CHANGELOG `[Unreleased]` entry. ROADMAP success-criteria boxes ticked.
+
+### Not done in this PR (deliberate)
+
+ViewModel persistence + invalidate side-effects are not unit-tested — that path uses `SharedPreferences` and `viewModelScope` which need Robolectric; this project does not currently use Robolectric and adding it for one signal is out of scope. The Gson contract is the load-bearing piece; the linear glue beyond it is operator-verified on the controller after merge.
+
+### Note on the routine
+
+Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` shipped an empty branch on its first run. aegis re-ran the spec from the pickup conversation; this branch + paired DroneOpsCommand commit are the result.
+
 ## 2026-04-24 — Kotlin resumption executed (aegis; ports + CI move + cleanup)
 
 ### Completed
