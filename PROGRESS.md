@@ -87,3 +87,26 @@ Session-by-session notes. Most recent first.
 - Aegis executes `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`.
 - On completion, code-reviewer verifies per plan §12.
 - Bill performs end-to-end verification per plan §11.5–§11.9 on his RC Pro.
+
+## 2026-04-24 PM — Kotlin resumption SHIPPED; v1.3.25 queued
+
+### Completed this session
+- Aegis executed the Kotlin-resumption plan in full. Commits on `main`: `98ac7a3` (feature, PR #49), `54e4877` (auto-bump to 1.3.24), `c6e10ab` (CI PATH fix, PR #50), `832585c` (CHANGELOG release-heading, PR #51).
+- BOS-HQ self-hosted runner `runner-droneopssync` + dind sidecar added to `/opt/gh-runner/docker-compose.yml`; registered against this repo. Runner online, labels `self-hosted linux x64 bos android docker`.
+- Release `v1.3.24` — https://github.com/BigBill1418/DroneOpsSync/releases/tag/v1.3.24. APK 11,528,646 B. Signer SHA-256 `7406a246572ce65c3d7f81a88d27b5a26f89e7817f583f9e2975c67c2b475508` — identical to v1.3.23's → zero-sideload gate PASSED.
+- CI run IDs (all on self-hosted runner): `24904190685` (version-bump), `24904726954` (release build).
+- Code-reviewer pass found one HIGH (CHANGELOG `[Unreleased]` heading on shipped content) — fixed in PR #51. No BLOCKERs. No other HIGHs. Four NITs captured as future FU items.
+- Operator (Bill) installed v1.3.24 via in-app Check-for-Updates on RC Pro. OTA flow worked zero-sideload. Pairing banner + preflight gate surfaced correctly when the earlier-morning rotated M4TD key was detected as `invalid_key`; Bill re-pasted the new key and the 3 pending FlightRecord uploads succeeded.
+- Operator confirmed: none of his other DJI controllers share the M4TD key. Per-controller independence — v1.3.25 auto-rotation design does not need to handle shared-key scenarios.
+
+### Scheduled (not yet executed)
+- Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (fired 2026-04-24T18:58Z) will open PRs for v1.3.25 zero-touch device API key rotation across this repo and DroneOpsCommand. See ROADMAP.md `v1.3.25` section for design + success criteria.
+
+### Decisions
+- Kotlin resumption is complete. v1.3.24 baseline is signed-correctly and OTA-distributable. Future work resumes from here.
+- Bill's "unfortunate" re-paste today was caused by the morning's M4TD rotation, NOT by the upgrade (SharedPreferences survives same-keystore upgrades). The preflight gate correctly surfaced the invalid-key state instead of silent-failing — working as designed. v1.3.25 eliminates even this one-time paste for future rotations.
+- Pushover watchdog verified end-to-end live to `PrimaryPhoneS25` (request `3eac9d51-fc67-4248-8a8a-038daac5a023`). Env lives at `~/droneops/.env` on BOS-HQ (not `/opt/droneops/.env` as earlier memory claimed). USER_KEY is Bill's canonical; TOKEN is a dedicated DroneOps Pushover app (separate rate-limit bucket from NOC).
+
+### Next
+- Wait for `trig_01KiBK88vqs6vtRf75rkxcw8` to complete and open PRs. Bill reviews + squash-merges; post-merge CI builds v1.3.25.
+- Operator: install v1.3.24 on remaining DJI controllers via each one's Check-for-Updates. Same keystore + same OTA flow = zero-sideload per device.
