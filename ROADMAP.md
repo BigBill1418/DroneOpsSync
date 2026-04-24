@@ -26,8 +26,8 @@
 **Remote routine:** `trig_01KiBK88vqs6vtRf75rkxcw8` — https://claude.ai/code/routines/trig_01KiBK88vqs6vtRf75rkxcw8. Expected output: one PR against `main` here, one PR against `main` in DroneOpsCommand, tests passing in the remote sandbox. CI will fire after Bill merges.
 
 **Success criteria:**
-- [ ] PR opened against DroneOpsSync `main` (`feat(kotlin): auto-pickup of server-rotated API keys via preflight response`)
-- [ ] PR opened against DroneOpsCommand `main` (`feat: zero-touch device API key rotation (ADR-0003)`)
+- [x] PR opened against DroneOpsSync `main` (`feat(kotlin): auto-pickup of server-rotated API keys via preflight response`) — branch `claude/auto-rotation-client`, opened 2026-04-24 evening
+- [x] PR opened against DroneOpsCommand `main` (`feat: zero-touch device API key rotation (ADR-0003)`) — note: that repo has an `auto-merge-claude.yml` workflow that promoted the branch to `main` 7s after push; commit `e0295a1` is reviewable directly on `main`. Operator can revert if review surfaces issues.
 - [ ] v1.3.25 APK ships post-merge with same keystore as v1.3.24 (`apksigner verify --print-certs` match)
 - [ ] End-to-end dry-run: operator rotates a dev-tier device key server-side; paired controller picks it up on next sync without any Settings interaction
 

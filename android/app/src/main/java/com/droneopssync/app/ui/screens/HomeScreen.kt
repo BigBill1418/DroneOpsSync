@@ -94,6 +94,21 @@ fun HomeScreen(
     val context = LocalContext.current
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
+    // ADR-0003 zero-touch key rotation: collect one-shot toast events from the
+    // ViewModel and surface them via Android Toast. Uses Toast (not Snackbar)
+    // because this app does not have a SnackbarHost wired into the scaffold,
+    // and the rotation event is rare + transient enough that a system Toast
+    // is the right fit.
+    LaunchedEffect(Unit) {
+        viewModel.toastEvents.collect { msg ->
+            android.widget.Toast.makeText(
+                context,
+                msg,
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     // ── Delete confirmation dialog ────────────────────────────────────────────
     if (showDeleteDialog) {
         AlertDialog(

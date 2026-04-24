@@ -4,6 +4,21 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Added — zero-touch device API key rotation client (ADR-0002)
+
+Paired with DroneOpsCommand v2.63.6 (ADR-0003). When the operator rotates a device's API key on the server, the paired RC Pro picks up the new key automatically on its next preflight call — no manual paste.
+
+- `DeviceHealthResponse` typed Gson model replaces the prior `Response<Map<String, Any>>` shape on `DroneOpsSyncService.deviceHealth`. Forward-compatible — Gson silently ignores unknown JSON fields.
+- `MainViewModel.preflightHealth` parses the new `rotated_key` + `rotation_grace_until` fields (populated by the server only on OLD-key auth during a 24h grace window). Validates prefix `doc_` and length ≥ 40 before persisting; bad payloads log WARN and are ignored.
+- On a valid hint: persists to `SharedPreferences[PREF_API_KEY]`, calls `ApiClient.invalidate()`, refreshes pairing state, and emits a one-shot `"API key auto-updated"` toast via a new `MainViewModel.toastEvents: SharedFlow<String>` (replay=0, DROP_OLDEST).
+- `HomeScreen` collects the toast flow and displays via `android.widget.Toast` (no SnackbarHost in this app's scaffold).
+- New unit-test infrastructure: `android/app/src/test/java/com/droneopssync/app/api/KeyRotationParseTest.kt` (6 tests, all green) covering the parse contract — full payload, absent hint, unknown extra fields, empty key, status-only minimal response, and the prefix/length validation contract.
+- `testImplementation 'junit:junit:4.13.2'` + `testImplementation 'com.google.code.gson:gson:2.11.0'` added to `app/build.gradle`.
+
+ADR: [`docs/adr/0002-zero-touch-device-key-rotation-client.md`](docs/adr/0002-zero-touch-device-key-rotation-client.md). Plan: cross-references DroneOpsCommand `docs/plans/2026-04-24-zero-touch-key-rotation.md`.
+
+Branch: `claude/auto-rotation-client`. PR opens against `main` per the standard DroneOpsSync flow (claude/* → PR → squash merge); CI auto-bumps to v1.3.25 on merge.
+
 ## [1.3.24] — 2026-04-24
 
 Shipped via CI run `24904726954` on BOS-HQ self-hosted runner. APK signed with same keystore as v1.3.23 (cert fingerprint `7406a246...`) → OTA-upgrade-compatible, zero sideload. Plan: `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`. See ADR-0001 for the Kotlin resumption context.

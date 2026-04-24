@@ -110,4 +110,11 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 
     debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    // ── Unit tests (JVM-only; no Robolectric, no instrumented tests) ─────
+    // These run via `./gradlew test`. Bootstrapped 2026-04-24 alongside the
+    // ADR-0002 zero-touch key rotation pickup in MainViewModel — see
+    // android/app/src/test/java/com/droneopssync/app/api/KeyRotationParseTest.kt.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.google.code.gson:gson:2.11.0'
 }
