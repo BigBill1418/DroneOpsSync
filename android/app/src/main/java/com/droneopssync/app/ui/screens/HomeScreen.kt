@@ -75,6 +75,7 @@ fun HomeScreen(
     val connectionError by viewModel.connectionError.collectAsState()
     val updateState     by viewModel.updateState.collectAsState()
     val isScanning      by viewModel.isScanning.collectAsState()
+    val pairing         by viewModel.pairingState.collectAsState()
 
     val hasPending   = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced    = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
@@ -164,6 +165,7 @@ fun HomeScreen(
                 HeroContent(
                     serverReachable  = serverReachable,
                     connectionError  = connectionError,
+                    pairing          = pairing,
                     hasPending       = hasPending,
                     hasErrors        = hasErrors,
                     hasSynced        = hasSynced,
@@ -177,7 +179,8 @@ fun HomeScreen(
                     onDeleteSynced   = { showDeleteDialog = true },
                     onDownloadUpdate = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
                     onInstallUpdate  = onInstallUpdate,
-                    onDismissUpdate  = { viewModel.dismissUpdate() }
+                    onDismissUpdate  = { viewModel.dismissUpdate() },
+                    onOpenSettings   = onNavigateToSettings
                 )
             }
 
@@ -245,6 +248,7 @@ fun HomeScreen(
             HeroContent(
                 serverReachable   = serverReachable,
                 connectionError   = connectionError,
+                pairing           = pairing,
                 hasPending        = hasPending,
                 hasErrors         = hasErrors,
                 hasSynced         = hasSynced,
@@ -258,7 +262,8 @@ fun HomeScreen(
                 onDeleteSynced    = { showDeleteDialog = true },
                 onDownloadUpdate  = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
                 onInstallUpdate   = onInstallUpdate,
-                onDismissUpdate   = { viewModel.dismissUpdate() }
+                onDismissUpdate   = { viewModel.dismissUpdate() },
+                onOpenSettings    = onNavigateToSettings
             )
 
             StatusBar(statusMessage)
@@ -296,6 +301,7 @@ fun HomeScreen(
 private fun HeroContent(
     serverReachable: Boolean?,
     connectionError: String?,
+    pairing: MainViewModel.PairingState,
     hasPending: Boolean,
     hasErrors: Boolean,
     hasSynced: Boolean,
@@ -309,7 +315,8 @@ private fun HeroContent(
     onDeleteSynced: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: (String) -> Unit,
-    onDismissUpdate: () -> Unit
+    onDismissUpdate: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -362,6 +369,18 @@ private fun HeroContent(
         }
 
         Spacer(Modifier.height(26.dp))
+
+        // ── Pairing banner (silent-drift watchdog layer 1) ─────────────────
+        // Renders above ReadyToSyncBadge when the app is missing the server
+        // URL or API key (or has a malformed URL). Orthogonal to the
+        // network-reachability badge: you can be "reachable" but unpaired.
+        if (pairing is MainViewModel.PairingState.Unpaired) {
+            PairingBanner(
+                message = pairing.message,
+                onOpenSettings = onOpenSettings
+            )
+            Spacer(Modifier.height(14.dp))
+        }
 
         ReadyToSyncBadge(serverReachable)
 
@@ -527,6 +546,55 @@ private fun HeroContent(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp,
                     fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+// ── Pairing banner (silent-drift watchdog layer 1) ───────────────────────────
+@Composable
+private fun PairingBanner(message: String, onOpenSettings: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth(0.82f),
+        colors = CardDefaults.cardColors(containerColor = DocRed.copy(alpha = 0.08f)),
+        border = BorderStroke(2.dp, DocRed),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                "DEVICE NOT PAIRED",
+                color = DocRed,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.8.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                message,
+                color = DocRed.copy(alpha = 0.85f),
+                fontSize = 12.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onOpenSettings,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.5.dp, DocRed)
+            ) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = DocRed
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "OPEN SETTINGS",
+                    color = DocRed,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    letterSpacing = 0.8.sp
                 )
             }
         }

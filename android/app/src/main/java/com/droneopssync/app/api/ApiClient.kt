@@ -39,14 +39,70 @@ object ApiClient {
         cachedService = null
     }
 
-    private fun normalizeUrl(url: String): String {
-        var base = url.trim()
-        if (base.contains("://")) {
-            val pathStart = base.indexOf('/', base.indexOf("://") + 3)
-            if (pathStart > 0) base = base.substring(0, pathStart)
+    /**
+     * Normalize a user-entered server URL into a Retrofit-safe baseUrl.
+     *
+     * - Trims whitespace + trailing slashes.
+     * - If no scheme is present, prepends `https://` (mirrors companion v2.62.0
+     *   `DEFAULT_SERVER_URL` convention).
+     * - Strips any path component — Retrofit's baseUrl must be host-only.
+     * - Coerces plaintext `http://` on public hostnames to `https://`. LAN
+     *   hosts (loopback, RFC-1918, link-local) are preserved on `http://`
+     *   because they often lack TLS locally. The public-URL coercion fixes
+     *   the class of failure where CloudFlare's 80→443 redirect returns an
+     *   HTML body that Gson cannot parse (ADR-0001, ADR-0002 §4; ported from
+     *   DroneOpsCommand companion commit 890b875).
+     */
+    internal fun normalizeUrl(url: String): String {
+        var base = url.trim().trimEnd('/')
+        if (base.isEmpty()) return "/"
+
+        if (!base.contains("://")) {
+            base = "https://$base"
         }
-        if (!base.endsWith("/")) base = "$base/"
-        return base
+
+        val schemeEnd = base.indexOf("://") + 3
+        val pathStart = base.indexOf('/', schemeEnd)
+        if (pathStart > 0) base = base.substring(0, pathStart)
+
+        if (base.startsWith("http://", ignoreCase = true)) {
+            val hostPort = base.substring("http://".length)
+            val host = hostPort.substringBefore('/').substringBefore(':')
+            if (!isPrivateHost(host)) {
+                val upgraded = "https://$hostPort"
+                Log.w(TAG, "normalizeUrl: coerced plaintext public URL to HTTPS: $base -> $upgraded")
+                base = upgraded
+            }
+        }
+
+        return "$base/"
+    }
+
+    /**
+     * Returns true if the supplied host is a loopback, RFC-1918 private-range,
+     * or link-local address/name that is reasonable to reach over plaintext
+     * HTTP on a trusted LAN. Anything else — including public hostnames — is
+     * treated as non-private.
+     *
+     * Important: the caller must pass a *host* already parsed out of the URL
+     * (scheme + path stripped). Raw-URL `startsWith("10.")` checks admit
+     * strings like `10.example.com` as "private" and must be avoided.
+     */
+    private fun isPrivateHost(host: String): Boolean {
+        if (host.isEmpty()) return false
+        if (host.equals("localhost", ignoreCase = true)) return true
+        if (host == "::1") return true
+        if (host == "127.0.0.1") return true
+        // Numeric-only IPv4 literals qualify for the RFC-1918 checks; a name
+        // like `10.example.com` is rejected because the final octet is not
+        // numeric.
+        if (!host.matches(Regex("^[0-9.]+$"))) return false
+        if (host.startsWith("127.")) return true
+        if (host.startsWith("10.")) return true
+        if (host.startsWith("192.168.")) return true
+        if (host.startsWith("169.254.")) return true
+        if (Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(host)) return true
+        return false
     }
 
     private fun buildClient(): OkHttpClient {

@@ -18,7 +18,6 @@ import com.droneopssync.app.model.UploadStatus
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -54,7 +53,11 @@ private const val PREF_API_KEY      = "api_key"
 private const val PREF_LOG_PATHS    = "log_paths"
 private const val PREF_SYNC_HISTORY = "sync_history"
 private const val PREF_AUTO_SYNC    = "auto_sync_enabled"
-private const val DEFAULT_SERVER    = "http://10.50.0.5:3080"
+// Pre-baked public URL for the primary instance (mirrors companion v2.62.0's
+// DEFAULT_SERVER_URL). Previous default was a stale internal 10.x LAN IP that
+// only resolved on HSH-HQ's WireGuard mesh and has been dead since the
+// 2026-04-20 migration to BOS-HQ. See ADR-0001.
+private const val DEFAULT_SERVER    = "https://droneops.barnardhq.com"
 private const val MAX_HISTORY       = 100
 
 class MainViewModel : ViewModel() {
@@ -130,6 +133,88 @@ class MainViewModel : ViewModel() {
 
     private val downloadClient: OkHttpClient by lazy { OkHttpClient() }
 
+    // ── Pairing state (silent-drift watchdog layer 1, ADR-0001) ──────────────
+    sealed class PairingState {
+        data object Paired : PairingState()
+        data class Unpaired(val reason: String, val message: String) : PairingState()
+    }
+
+    private val _pairingState = MutableStateFlow<PairingState>(PairingState.Paired)
+    val pairingState: StateFlow<PairingState> = _pairingState
+
+    /** Pure — no side effects. Returns the structural pairing status. */
+    private fun checkPairing(
+        url: String = _serverUrl.value,
+        key: String = _apiKey.value
+    ): PairingState {
+        if (url.isBlank()) return PairingState.Unpaired(
+            "missing_url",
+            "Server URL is not set. Open Settings and enter the DroneOps server URL."
+        )
+        if (key.isBlank()) return PairingState.Unpaired(
+            "missing_key",
+            "API key is not set. Open Settings and paste the key from DroneOps Settings → Device Access."
+        )
+        if (!url.isValidUrl()) return PairingState.Unpaired(
+            "invalid_url",
+            "Server URL must start with http:// or https://. Open Settings."
+        )
+        return PairingState.Paired
+    }
+
+    /** Publishes the current pairing state to observers. */
+    private fun refreshPairing() {
+        _pairingState.value = checkPairing()
+    }
+
+    // ── Preflight health gate (silent-drift watchdog layer 2, ADR-0001) ──────
+    sealed class PreflightResult {
+        data object Ok : PreflightResult()
+        data class Fail(val code: String, val status: Int?, val message: String) : PreflightResult()
+    }
+
+    /**
+     * Runs BEFORE every upload attempt. On failure, returns a classified
+     * [PreflightResult.Fail] so callers render a specific banner instead of
+     * silently retrying. Ported from companion v2.62.1's `preflightHealth()`.
+     */
+    private suspend fun preflightHealth(url: String, apiKey: String): PreflightResult {
+        return try {
+            val response = ApiClient.create(url).deviceHealth(apiKey)
+            when {
+                response.isSuccessful -> PreflightResult.Ok
+                response.code() == 401 -> PreflightResult.Fail(
+                    "invalid_key",
+                    401,
+                    "Server rejected the API key. Open Settings → Device Access on the server, copy the key, and re-paste it here."
+                )
+                else -> PreflightResult.Fail(
+                    "server_error",
+                    response.code(),
+                    "Server returned HTTP ${response.code()}. Try again; if it persists, check the DroneOps server status."
+                )
+            }
+        } catch (e: UnknownHostException) {
+            PreflightResult.Fail(
+                "unreachable",
+                null,
+                "Cannot reach $url — check Wi-Fi and server status."
+            )
+        } catch (e: SocketTimeoutException) {
+            PreflightResult.Fail(
+                "unreachable",
+                null,
+                "Server at $url timed out — check Wi-Fi and server status."
+            )
+        } catch (e: IOException) {
+            PreflightResult.Fail(
+                "unreachable",
+                null,
+                "Network error reaching $url: ${e.message?.take(120)}"
+            )
+        }
+    }
+
     // ── Settings ──────────────────────────────────────────────────────────────
 
     fun loadSettings(prefs: SharedPreferences) {
@@ -162,6 +247,8 @@ class MainViewModel : ViewModel() {
         }
 
         _autoSyncEnabled.value = prefs.getBoolean(PREF_AUTO_SYNC, true)
+
+        refreshPairing()
     }
 
     fun saveSettings(
@@ -185,6 +272,7 @@ class MainViewModel : ViewModel() {
         _statusMessage.value = "Settings saved"
 
         if (urlChanged) ApiClient.invalidate()
+        refreshPairing()
         checkServerHealth()
     }
 
@@ -319,11 +407,31 @@ class MainViewModel : ViewModel() {
         val key = _apiKey.value
         if (url.isBlank() || key.isBlank()) {
             _statusMessage.value = "Configure server URL and API key in Settings"
+            refreshPairing()
             return 0
         }
         if (!url.isValidUrl()) {
             _statusMessage.value = "Invalid URL — must start with http:// or https://"
+            refreshPairing()
             return 0
+        }
+
+        // ── Preflight health gate (layer 2) ─────────────────────────────────
+        // Block the upload if the server is unreachable or the key is bad.
+        // Silent retries are exactly the class of failure that let the
+        // 2026-04-23 RC Pro incident run for weeks unnoticed.
+        when (val pre = preflightHealth(url, key)) {
+            is PreflightResult.Ok -> {
+                _connectionError.value = null
+                _serverReachable.value = true
+            }
+            is PreflightResult.Fail -> {
+                _statusMessage.value = pre.message
+                _connectionError.value = pre.message
+                _serverReachable.value = false
+                diag(DiagLevel.ERROR, "PREFLIGHT", "${pre.code} status=${pre.status} msg=${pre.message}")
+                return 0
+            }
         }
 
         _isUploading.value = true
@@ -456,14 +564,25 @@ class MainViewModel : ViewModel() {
 
             val url = _serverUrl.value
             val key = _apiKey.value
-            if (url.isBlank() || key.isBlank()) return@launch
-
-            // Wait up to 8 s for the concurrent health check to resolve
-            val deadline = System.currentTimeMillis() + 8_000L
-            while (_serverReachable.value == null && System.currentTimeMillis() < deadline) {
-                delay(250)
+            if (url.isBlank() || key.isBlank()) {
+                refreshPairing()
+                return@launch
             }
-            if (_serverReachable.value != true) return@launch
+
+            // Preflight health gate — mirrors companion v2.62.1. Authenticated
+            // probe replaces the old 8 s wait on the unauthenticated /health
+            // poll; we need to know the *key* is accepted before attempting
+            // the multipart upload.
+            val pre = preflightHealth(url, key)
+            if (pre is PreflightResult.Fail) {
+                _statusMessage.value = pre.message
+                _connectionError.value = pre.message
+                _serverReachable.value = false
+                diag(DiagLevel.WARN, "AUTO", "Preflight failed — aborting auto-sync: ${pre.message}")
+                return@launch
+            }
+            _serverReachable.value = true
+            _connectionError.value = null
 
             diag(DiagLevel.INFO, "AUTO", "Auto-sync starting")
             val deletable = performUpload()
@@ -478,9 +597,24 @@ class MainViewModel : ViewModel() {
         if (!_autoSyncEnabled.value) return
         if (_isUploading.value) return
         if (_logs.value.none { it.uploadStatus == UploadStatus.PENDING }) return
-        if (_serverUrl.value.isBlank() || _apiKey.value.isBlank()) return
+        val url = _serverUrl.value
+        val key = _apiKey.value
+        if (url.isBlank() || key.isBlank()) {
+            refreshPairing()
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            diag(DiagLevel.INFO, "AUTO", "Network connected — auto-sync triggered")
+            diag(DiagLevel.INFO, "AUTO", "Network connected — preflighting")
+            val pre = preflightHealth(url, key)
+            if (pre is PreflightResult.Fail) {
+                _statusMessage.value = pre.message
+                _connectionError.value = pre.message
+                _serverReachable.value = false
+                diag(DiagLevel.WARN, "AUTO", "Network-triggered sync aborted at preflight: ${pre.message}")
+                return@launch
+            }
+            _serverReachable.value = true
+            _connectionError.value = null
             _statusMessage.value = "Network connected — syncing…"
             val deletable = performUpload()
             if (deletable > 0) _promptDelete.value = true

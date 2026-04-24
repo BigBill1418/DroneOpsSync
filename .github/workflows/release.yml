@@ -13,11 +13,12 @@ on:
 jobs:
   release:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    # BOS-HQ self-hosted runner pool (ADR-0029). DinD sidecar provides Docker;
+    # JDK + Android SDK are provisioned per-run because the runner is
+    # ephemeral.
+    runs-on: [self-hosted, linux, x64, bos]
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -28,16 +29,23 @@ jobs:
         id: version
         run: |
           VERSION=$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)
-          echo "name=$VERSION" >> $GITHUB_OUTPUT
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-33 build-tools;33.0.2'
+
       - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/app/keystore/droneopssync.keystore
+          echo "$KEYSTORE_B64" | base64 -d > android/app/keystore/droneopssync.keystore
 
       - name: Build APK
         env:
@@ -50,9 +58,32 @@ jobs:
           bash gradlew assembleRelease --no-daemon
 
       - name: Rename APK
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           mv android/app/build/outputs/apk/release/app-release.apk \
-             DroneOpsSync-v${{ steps.version.outputs.name }}.apk
+             "DroneOpsSync-v${VERSION_NAME}.apk"
+
+      - name: Verify APK signature (fingerprint must match v1.3.23's cert)
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          APK="DroneOpsSync-v${VERSION_NAME}.apk"
+          apksigner verify --print-certs "$APK"
+          FINGERPRINT=$(apksigner verify --print-certs "$APK" | grep -iE "SHA-256" | head -1)
+          echo "::notice title=APK signer fingerprint::${FINGERPRINT}"
+
+      - name: Verify APK metadata (versionName + targetSdk)
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          APK="DroneOpsSync-v${VERSION_NAME}.apk"
+          aapt dump badging "$APK" | grep -E "^(package|application-label|sdkVersion|targetSdkVersion):" | head -5
+          VERSION_IN_APK=$(aapt dump badging "$APK" | grep -oE "versionName='[^']+'" | cut -d"'" -f2)
+          if [ "$VERSION_IN_APK" != "$VERSION_NAME" ]; then
+            echo "::error::versionName mismatch: APK has $VERSION_IN_APK, expected $VERSION_NAME"
+            exit 1
+          fi
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
