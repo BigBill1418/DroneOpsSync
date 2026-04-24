@@ -12,11 +12,10 @@ on:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
+    # BOS-HQ self-hosted runner pool (ADR-0029).
+    runs-on: [self-hosted, linux, x64, bos]
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -29,9 +28,9 @@ jobs:
         run: |
           MSG=$(git log -1 --pretty=%s)
           if echo "$MSG" | grep -qi "bump version"; then
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Read current version
@@ -39,18 +38,20 @@ jobs:
         if: steps.guard.outputs.skip == 'false'
         run: |
           VERSION=$(grep '^VERSION_NAME=' android/version.properties | cut -d= -f2)
-          echo "current=$VERSION" >> $GITHUB_OUTPUT
+          echo "current=$VERSION" >> "$GITHUB_OUTPUT"
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
           NEW_PATCH=$(( PATCH + 1 ))
           NEW="$MAJOR.$MINOR.$NEW_PATCH"
-          echo "new=$NEW" >> $GITHUB_OUTPUT
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
       - name: Write new version
         if: steps.guard.outputs.skip == 'false'
+        env:
+          NEW_VERSION: ${{ steps.read.outputs.new }}
         run: |
-          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${{ steps.read.outputs.new }}/" android/version.properties
+          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${NEW_VERSION}/" android/version.properties
 
       - name: Commit and push
         if: steps.guard.outputs.skip == 'false'

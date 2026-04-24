@@ -25,4 +25,17 @@ interface DroneOpsSyncService {
 
     @GET("/api/health")
     suspend fun health(): Response<Map<String, String>>
+
+    /**
+     * Authenticated preflight health probe. The server returns a JSON body
+     * describing the device's last-seen state; we only care about the HTTP
+     * status code. Invoked before every upload to surface "server rejected
+     * key" / "server unreachable" errors to the user *before* attempting the
+     * multipart POST, rather than failing silently. ADR-0001 §5 (via
+     * DroneOpsCommand companion v2.62.1 commit 306a2b8).
+     */
+    @GET("/api/flight-library/device-health")
+    suspend fun deviceHealth(
+        @Header("X-Device-Api-Key") apiKey: String
+    ): Response<Map<String, Any>>
 }

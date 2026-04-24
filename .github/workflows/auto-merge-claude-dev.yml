@@ -7,7 +7,8 @@ on:
 
 jobs:
   merge:
-    runs-on: ubuntu-latest
+    # BOS-HQ self-hosted runner pool (ADR-0029).
+    runs-on: [self-hosted, linux, x64, bos]
     permissions:
       contents: write
 
