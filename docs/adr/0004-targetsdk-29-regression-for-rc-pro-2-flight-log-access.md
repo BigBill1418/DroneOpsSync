@@ -1,10 +1,20 @@
 # ADR-0004 — `targetSdk` 35 → 29 to keep DJI flight-log scanning working on the RC Pro 2
 
-- **Status:** Accepted
+> **SUPERSEDED 2026-05-01 by [ADR-0005](0005-saf-tree-picker-for-dji-flight-logs.md).**
+>
+> The `targetSdk` regression shipped (v1.3.26) and was empirically
+> confirmed not to fix the RC Pro 2 — the AOSP-strict legacy-storage
+> view does not expose `Android/data/<other-pkg>` even when the legacy
+> flag is honored. ADR-0005 reverts the targetSdk drop and adds a SAF
+> tree-picker as the primary scan path on Android 11+, which is the
+> approach AirData and every shipping file manager use in production
+> on this device class.
+
+- **Status:** Superseded by ADR-0005
 - **Date:** 2026-05-01
 - **Owners:** Bill (operator), Aegis (implementation)
 - **Supersedes:** none
-- **Related:** ADR-0001 (Kotlin resumption), ADR-0002 (zero-touch key rotation), `android/app/build.gradle`, `android/app/src/main/AndroidManifest.xml`, `MainViewModel.scanLogs()` / `performScan()`
+- **Related:** ADR-0001 (Kotlin resumption), ADR-0002 (zero-touch key rotation), ADR-0005 (SAF tree-picker — the actual fix), `android/app/build.gradle`, `android/app/src/main/AndroidManifest.xml`, `MainViewModel.scanLogs()` / `performScan()`
 
 ---
 

@@ -1,13 +1,26 @@
 package com.droneopssync.app.model
 
+import android.net.Uri
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * @param file       the bytes the upload pipeline consumes — for SAF
+ *                   entries this is a per-scan staging copy in `cacheDir`,
+ *                   for Legacy entries this is the actual file on /sdcard.
+ * @param sourceUri  ADR-0005: when set, the original SAF document URI on
+ *                   the controller. The upload still keys off `file`;
+ *                   `sourceUri` exists so post-upload "delete from
+ *                   controller" can call `DocumentsContract.deleteDocument`
+ *                   on the right artifact instead of silently deleting only
+ *                   our cache copy.
+ */
 data class FlightLog(
     val file: File,
-    val uploadStatus: UploadStatus = UploadStatus.PENDING
+    val uploadStatus: UploadStatus = UploadStatus.PENDING,
+    val sourceUri: Uri? = null,
 ) {
     val name: String get() = file.name
     val sizeBytes: Long get() = file.length()

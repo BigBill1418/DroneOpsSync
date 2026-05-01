@@ -2,6 +2,7 @@ package com.droneopssync.app
 
 import android.Manifest
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +40,30 @@ class MainActivity : ComponentActivity() {
     // Launcher for READ + WRITE EXTERNAL_STORAGE on Android 9/10
     private val requestStoragePermission =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* nothing to do */ }
+
+    // ── ADR-0005: SAF tree-picker for DJI flight logs on AOSP-strict Android 11+ ─
+    // Result is the user-selected directory URI. We persist it across reboots
+    // via takePersistableUriPermission; the ViewModel reads it on next scan.
+    private val openTreeLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            if (uri == null) {
+                // User cancelled. Banner stays visible; ViewModel's
+                // _needsSafGrant remains true.
+                return@registerForActivityResult
+            }
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            try {
+                contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: SecurityException) {
+                // Provider refused the persistable grant. Treat as a
+                // failed grant — ViewModel will keep prompting.
+                viewModel.onSafGrantFailed(uri.toString(), e.message ?: "SecurityException")
+                return@registerForActivityResult
+            }
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            prefs.edit().putString(PREF_SAF_FLIGHT_LOG_URI, uri.toString()).apply()
+            viewModel.onSafGrantReceived(uri)
+        }
 
     // Auto-sync when network becomes available (foreground only)
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -75,7 +101,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ — request All Files Access
+            // Android 11+ — request All Files Access. Still useful as a
+            // fallback for permissive OEMs (Samsung) where the legacy File
+            // path keeps working without a SAF grant. SAF is the primary
+            // path on stock-AOSP Android 11/12 (e.g. DJI RC Pro 2) — see
+            // ADR-0005.
             if (!Environment.isExternalStorageManager()) {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = Uri.parse("package:$packageName")
@@ -93,8 +123,8 @@ class MainActivity : ComponentActivity() {
             if (toRequest.isNotEmpty()) requestStoragePermission.launch(toRequest)
         }
 
-        val prefs = getSharedPreferences("droneopssync_prefs", MODE_PRIVATE)
-        viewModel.loadSettings(prefs)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        viewModel.loadSettings(prefs, applicationContext)
         viewModel.checkServerHealth()
         viewModel.checkForUpdate()
         viewModel.startAutoFlow()
@@ -120,14 +150,16 @@ class MainActivity : ComponentActivity() {
                             onNavigateToSettings = { navController.navigate("settings") },
                             onNavigateToDiag = { navController.navigate("diag") },
                             onNavigateToHistory = { navController.navigate("history") },
-                            onInstallUpdate = { apkPath -> installApk(apkPath) }
+                            onInstallUpdate = { apkPath -> installApk(apkPath) },
+                            onRequestSafGrant = { launchSafTreePicker() }
                         )
                     }
                     composable("settings") {
                         SettingsScreen(
                             viewModel = viewModel,
                             prefs = sharedPrefs,
-                            onBack = { navController.popBackStack() }
+                            onBack = { navController.popBackStack() },
+                            onRequestSafGrant = { launchSafTreePicker() }
                         )
                     }
                     composable("diag") {
@@ -147,6 +179,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Build the `ACTION_OPEN_DOCUMENT_TREE` intent with `EXTRA_INITIAL_URI`
+     * pre-seeded to the DJI Fly FlightRecord directory so the picker
+     * lands the operator one tap away from "Use this folder."
+     *
+     * On Android 8+ `EXTRA_INITIAL_URI` is honored when it points to a
+     * document URI under `com.android.externalstorage.documents`. The
+     * `:` in `primary:Android/...` is part of the document ID — encoded
+     * by `buildDocumentUri`.
+     */
+    private fun launchSafTreePicker() {
+        val initialUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            DocumentsContract.buildDocumentUri(
+                EXTERNAL_STORAGE_AUTHORITY,
+                DJI_FLY_FLIGHTRECORD_DOCUMENT_ID,
+            )
+        } else {
+            null
+        }
+        try {
+            // The OpenDocumentTree contract internally builds an
+            // ACTION_OPEN_DOCUMENT_TREE intent and ANDs FLAG_GRANT_READ.
+            // We only need to pass the optional initial URI hint.
+            openTreeLauncher.launch(initialUri)
+        } catch (e: Exception) {
+            // If the picker is somehow missing on this device (no
+            // DocumentsUI), surface a diag entry — the banner will keep
+            // showing and the operator knows to fall back to a wired pull.
+            viewModel.onSafGrantFailed(
+                "(picker)",
+                "${e.javaClass.simpleName}: ${e.message}",
+            )
+        }
+    }
+
     private fun installApk(apkPath: String) {
         val apkFile = File(apkPath)
         if (!apkFile.exists()) return
@@ -161,5 +228,25 @@ class MainActivity : ComponentActivity() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    companion object {
+        // Shared with MainViewModel.loadSettings via the SharedPreferences
+        // instance handed in. Kept as constants here so the activity-side
+        // SAF onboarding writes to the same key the ViewModel reads.
+        const val PREFS_NAME = "droneopssync_prefs"
+        const val PREF_SAF_FLIGHT_LOG_URI = "saf_flight_log_uri"
+
+        // ExternalStorageProvider authority — stable, AOSP-canonical.
+        private const val EXTERNAL_STORAGE_AUTHORITY =
+            "com.android.externalstorage.documents"
+
+        // Document ID for the DJI Fly FlightRecord directory under the
+        // primary external volume. Format: "primary:<relative-path>".
+        // Confirmed correct path; SAF takes a directory URI, not a string
+        // literal, so this only seeds the picker — the operator's grant
+        // is what we persist.
+        private const val DJI_FLY_FLIGHTRECORD_DOCUMENT_ID =
+            "primary:Android/data/dji.go.v5/files/FlightRecord"
     }
 }

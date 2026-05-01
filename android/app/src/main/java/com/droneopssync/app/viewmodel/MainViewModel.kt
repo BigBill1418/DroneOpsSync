@@ -1,9 +1,12 @@
 package com.droneopssync.app.viewmodel
 
+import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.droneopssync.app.BuildConfig
@@ -15,6 +18,9 @@ import com.droneopssync.app.model.FlightLog
 import com.droneopssync.app.model.SyncRecord
 import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
+import com.droneopssync.app.storage.FlightLogSource
+import com.droneopssync.app.storage.LegacyFileSource
+import com.droneopssync.app.storage.SafTreeSource
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -51,11 +57,16 @@ private val DEFAULT_PATHS = listOf(
     "/storage/emulated/0/DJI/dji.go.v4/FlightRecord"
 )
 
-private const val PREF_SERVER_URL   = "server_url"
-private const val PREF_API_KEY      = "api_key"
-private const val PREF_LOG_PATHS    = "log_paths"
-private const val PREF_SYNC_HISTORY = "sync_history"
-private const val PREF_AUTO_SYNC    = "auto_sync_enabled"
+private const val PREF_SERVER_URL          = "server_url"
+private const val PREF_API_KEY             = "api_key"
+private const val PREF_LOG_PATHS           = "log_paths"
+private const val PREF_SYNC_HISTORY        = "sync_history"
+private const val PREF_AUTO_SYNC           = "auto_sync_enabled"
+// ADR-0005: persisted SAF tree URI granted by the operator. Mirrors
+// MainActivity.PREF_SAF_FLIGHT_LOG_URI; kept private here so the
+// activity-side onboarding writes it and the ViewModel reads it from
+// the same key.
+private const val PREF_SAF_FLIGHT_LOG_URI  = "saf_flight_log_uri"
 // Pre-baked public URL for the primary instance (mirrors companion v2.62.0's
 // DEFAULT_SERVER_URL). Previous default was a stale internal 10.x LAN IP that
 // only resolved on HSH-HQ's WireGuard mesh and has been dead since the
@@ -67,6 +78,33 @@ class MainViewModel : ViewModel() {
 
     // SharedPreferences reference stored on first loadSettings call
     private var prefs: SharedPreferences? = null
+
+    // ── ADR-0005 SAF support ─────────────────────────────────────────────────
+    // Application Context, captured once via loadSettings(prefs, context).
+    // Needed because SafTreeSource has to resolve content URIs and write
+    // staging files to cacheDir. Application Context only — never an
+    // Activity Context — to avoid leaks.
+    private var appContext: Context? = null
+
+    // The tree URI the operator granted via the SAF picker. Persisted to
+    // SharedPreferences[PREF_SAF_FLIGHT_LOG_URI]. Null on first launch,
+    // on Android <=10 (where the picker is never shown), and after a
+    // failed/revoked grant detection.
+    private val _safTreeUri = MutableStateFlow<Uri?>(null)
+    val safTreeUri: StateFlow<Uri?> = _safTreeUri
+
+    // True when the OS would block our File-based scan AND we don't yet
+    // have a SAF grant. Drives the home-screen banner. Only ever true on
+    // Android 11+ — Android <=10 has no scoped-storage lockdown and
+    // Samsung's permissive MES on 11+ keeps Legacy working without SAF.
+    //
+    // The toggle from "needs grant" → "no longer needs grant" is driven
+    // by either:
+    //   (a) the operator completing the SAF picker → onSafGrantReceived
+    //   (b) a Legacy scan finding files anyway (Samsung path) → set to
+    //       false in performScan() after a successful Legacy hit
+    private val _needsSafGrant = MutableStateFlow(false)
+    val needsSafGrant: StateFlow<Boolean> = _needsSafGrant
 
     // ── Sync history ──────────────────────────────────────────────────────────
     private val _syncHistory = MutableStateFlow<List<SyncRecord>>(emptyList())
@@ -293,8 +331,9 @@ class MainViewModel : ViewModel() {
 
     // ── Settings ──────────────────────────────────────────────────────────────
 
-    fun loadSettings(prefs: SharedPreferences) {
+    fun loadSettings(prefs: SharedPreferences, context: Context? = null) {
         this.prefs = prefs
+        if (context != null) this.appContext = context.applicationContext
         _serverUrl.value = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
         _apiKey.value    = prefs.getString(PREF_API_KEY, "") ?: ""
 
@@ -302,16 +341,44 @@ class MainViewModel : ViewModel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val granted = Environment.isExternalStorageManager()
             if (granted) {
-                diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED")
+                diag(DiagLevel.INFO, "PERM", "MANAGE_EXTERNAL_STORAGE: GRANTED (Samsung-permissive Legacy fallback may work)")
             } else {
-                diag(DiagLevel.ERROR, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — scan will fail on Android 11+; open Settings and grant 'All files access' to this app")
+                diag(DiagLevel.WARN, "PERM", "MANAGE_EXTERNAL_STORAGE: NOT GRANTED — Legacy fallback unavailable; SAF grant is required on stock-AOSP Android 11+")
             }
         } else {
-            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE needed)")
+            diag(DiagLevel.INFO, "PERM", "Android <11 — legacy storage (no MANAGE_EXTERNAL_STORAGE / SAF needed)")
         }
 
         _logPathsText.value = prefs.getString(PREF_LOG_PATHS, DEFAULT_PATHS.joinToString("\n"))
             ?: DEFAULT_PATHS.joinToString("\n")
+
+        // ADR-0005: load persisted SAF tree URI if present. Validate it
+        // here — a stale entry (revoked grant, deleted directory) is
+        // surfaced to the operator via the banner instead of silently
+        // failing on the next scan.
+        val safRaw = prefs.getString(PREF_SAF_FLIGHT_LOG_URI, null)
+        if (safRaw.isNullOrBlank()) {
+            _safTreeUri.value = null
+            diag(DiagLevel.INFO, "PERM", "SAF tree URI: not granted")
+        } else {
+            val parsed = runCatching { Uri.parse(safRaw) }.getOrNull()
+            _safTreeUri.value = parsed
+            diag(DiagLevel.INFO, "PERM", "SAF tree URI persisted: $safRaw")
+            if (parsed != null && appContext != null) {
+                val resolvable = runCatching {
+                    DocumentFile.fromTreeUri(appContext!!, parsed)?.canRead() == true
+                }.getOrDefault(false)
+                if (!resolvable) {
+                    diag(DiagLevel.WARN, "PERM", "SAF tree URI no longer resolvable — re-grant required")
+                }
+            }
+        }
+
+        // Surface "needs grant" only on Android 11+ (the picker is not
+        // shown otherwise). The performScan() path will lower this flag
+        // once it confirms Legacy is working on permissive OEMs.
+        _needsSafGrant.value =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && _safTreeUri.value == null
 
         // Load persisted sync history
         val json = prefs.getString(PREF_SYNC_HISTORY, null)
@@ -325,6 +392,26 @@ class MainViewModel : ViewModel() {
         _autoSyncEnabled.value = prefs.getBoolean(PREF_AUTO_SYNC, true)
 
         refreshPairing()
+    }
+
+    // ── ADR-0005: SAF onboarding callbacks (fired from MainActivity) ─────────
+
+    /** Called by MainActivity after a successful tree-picker grant. */
+    fun onSafGrantReceived(uri: Uri) {
+        _safTreeUri.value = uri
+        _needsSafGrant.value = false
+        diag(DiagLevel.INFO, "PERM", "SAF grant received: $uri")
+        // Immediate re-scan via the new source — operator expects a
+        // visible result without re-tapping SCAN.
+        scanLogs()
+    }
+
+    /** Called by MainActivity if the picker errored or the persistable grant was refused. */
+    fun onSafGrantFailed(uri: String, reason: String) {
+        diag(DiagLevel.ERROR, "PERM", "SAF grant failed for $uri — $reason")
+        // Keep _needsSafGrant true so the banner stays visible.
+        _needsSafGrant.value =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && _safTreeUri.value == null
     }
 
     fun saveSettings(
@@ -416,47 +503,72 @@ class MainViewModel : ViewModel() {
     /**
      * Core scan logic. Runs on whatever dispatcher the caller provides.
      * Returns the number of log files found.
+     *
+     * Source dispatch (ADR-0005):
+     *
+     *   if Android 11+ AND SAF grant present  → SafTreeSource
+     *   else                                  → LegacyFileSource
+     *
+     * On Android 11+ with no SAF grant, the Legacy path runs first as a
+     * permissive-OEM fallback (Samsung S25 Ultra works there). If Legacy
+     * comes back empty AND we don't yet have a SAF grant, the banner
+     * stays / becomes visible so the operator can grant. If Legacy
+     * succeeds, _needsSafGrant is lowered — no point nagging the
+     * operator on a device where the Samsung path is doing the job.
      */
     private suspend fun performScan(): Int {
+        _statusMessage.value = "Scanning for logs…"
+
         val paths = _logPathsText.value
             .lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
-        val found        = mutableListOf<FlightLog>()
-        val missingPaths = mutableListOf<String>()
+        val safUri = _safTreeUri.value
+        val ctx    = appContext
+        val useSaf = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                     safUri != null && ctx != null
 
-        _statusMessage.value = "Scanning for logs…"
-        diag(DiagLevel.INFO, "SCAN", "Scanning ${paths.size} path(s)")
+        val source: FlightLogSource = if (useSaf) {
+            SafTreeSource(safUri!!, ctx!!)
+        } else {
+            LegacyFileSource(paths)
+        }
 
-        for (pathStr in paths) {
-            val dir = File(pathStr)
-            diag(DiagLevel.INFO, "SCAN", "$pathStr — exists=${dir.exists()} isDir=${dir.isDirectory}")
-            Log.d(TAG, "performScan: checking $pathStr → exists=${dir.exists()} isDir=${dir.isDirectory}")
-            if (dir.exists() && dir.isDirectory) {
-                val hits = dir.listFiles { f ->
-                    f.isFile && f.extension.lowercase() in listOf("txt", "log", "csv", "json")
-                }?.toList() ?: emptyList()
-                hits.forEach {
-                    Log.d(TAG, "  found: ${it.absolutePath}")
-                    found.add(FlightLog(file = it))
-                }
-                diag(DiagLevel.INFO, "SCAN", "  ${hits.size} file(s) found")
-                hits.forEach { diag(DiagLevel.INFO, "SCAN", "  ${it.name}  (${it.length()} B)") }
-            } else {
-                missingPaths += pathStr
-                diag(DiagLevel.WARN, "SCAN", "Path not found: $pathStr")
+        diag(DiagLevel.INFO, "SCAN", "source=${source.label}  paths=${paths.size}")
+        if (useSaf) {
+            diag(DiagLevel.INFO, "SCAN", "  SAF treeUri=$safUri")
+        }
+
+        val result = source.scan()
+        result.perPathDiag.forEach { diag(DiagLevel.INFO, "SCAN", "  $it") }
+        result.missingPaths.forEach { diag(DiagLevel.WARN, "SCAN", "Missing: $it") }
+
+        var found = result.logs.sortedByDescending { it.file.lastModified() }
+
+        // Permissive-OEM detection: if Legacy succeeded on Android 11+,
+        // we don't need a SAF grant — lower the banner. If Legacy came
+        // back empty AND we're on Android 11+ with no SAF grant, the
+        // banner stays visible so the operator can complete onboarding.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !useSaf) {
+            if (found.isNotEmpty()) {
+                _needsSafGrant.value = false
+                diag(DiagLevel.INFO, "SCAN", "Legacy path succeeded on Android 11+ — SAF grant not required")
+            } else if (safUri == null) {
+                _needsSafGrant.value = true
+                diag(DiagLevel.WARN, "SCAN", "Legacy returned 0 logs on Android 11+ — SAF grant required")
             }
         }
 
-        found.sortByDescending { it.file.lastModified() }
         _logs.value = found
 
         _statusMessage.value = when {
+            found.isEmpty() && _needsSafGrant.value ->
+                "DJI Fly logs need a one-time folder grant — tap the banner to allow"
             found.isEmpty() -> "No log files found — check paths in Settings"
-            else -> "${found.size} log file(s) found across ${paths.size - missingPaths.size} path(s)"
+            else -> "${found.size} log file(s) found via ${source.label}"
         }
-        Log.d(TAG, "performScan done: found=${found.size}")
+        Log.d(TAG, "performScan done: source=${source.label} found=${found.size}")
         return found.size
     }
 
@@ -565,10 +677,17 @@ class MainViewModel : ViewModel() {
                         body.skipped > 0 -> {
                             setStatus(log, UploadStatus.DUPLICATE)
                             totalSkipped++
+                            // ADR-0005: SAF cache copy is no longer needed
+                            // — server has the bytes. Delete the staging
+                            // file to keep cacheDir bounded. The
+                            // controller-side artifact stays put until
+                            // the operator confirms the delete dialog.
+                            cleanupSafCacheFile(log)
                         }
                         else -> {
                             setStatus(log, UploadStatus.SYNCED)
                             totalImported += body.imported
+                            cleanupSafCacheFile(log)
                         }
                     }
                 } catch (e: UnknownHostException) {
@@ -731,7 +850,17 @@ class MainViewModel : ViewModel() {
             var deleted = 0
             var failed = 0
             for (log in toDelete) {
-                if (log.file.delete()) {
+                val ok = if (log.sourceUri != null) {
+                    // ADR-0005: SAF entry — delete the original on the
+                    // controller via DocumentsContract. Cache file is
+                    // already gone (post-upload cleanup). Falls back to
+                    // failure-marker if the provider revoked our grant
+                    // or the directory moved.
+                    deleteSafDocument(log.sourceUri)
+                } else {
+                    log.file.delete()
+                }
+                if (ok) {
                     setStatus(log, UploadStatus.DELETED)
                     deleted++
                 } else {
@@ -744,6 +873,28 @@ class MainViewModel : ViewModel() {
                 "$deleted deleted, $failed could not be removed (may already be gone)"
             }
         }
+    }
+
+    /**
+     * ADR-0005: delete a SAF-sourced document on the controller via the
+     * persisted tree grant. Returns true if the provider confirmed the
+     * delete, false on any error (revoked grant, missing file, IO).
+     */
+    private fun deleteSafDocument(uri: Uri): Boolean {
+        val ctx = appContext ?: return false
+        return runCatching {
+            android.provider.DocumentsContract.deleteDocument(ctx.contentResolver, uri)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * ADR-0005: tear down a single SAF staging file after upload. No-op
+     * on Legacy entries (sourceUri == null) — those files live on /sdcard
+     * and are deleted only when the operator confirms via deleteSynced.
+     */
+    private fun cleanupSafCacheFile(log: FlightLog) {
+        if (log.sourceUri == null) return
+        runCatching { log.file.delete() }
     }
 
     // ── OTA update ────────────────────────────────────────────────────────────

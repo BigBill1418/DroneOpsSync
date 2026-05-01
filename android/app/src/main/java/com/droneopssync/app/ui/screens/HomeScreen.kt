@@ -66,7 +66,8 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToDiag: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
-    onInstallUpdate: (String) -> Unit = {}
+    onInstallUpdate: (String) -> Unit = {},
+    onRequestSafGrant: () -> Unit = {}
 ) {
     val logs            by viewModel.logs.collectAsState()
     val statusMessage   by viewModel.statusMessage.collectAsState()
@@ -76,6 +77,7 @@ fun HomeScreen(
     val updateState     by viewModel.updateState.collectAsState()
     val isScanning      by viewModel.isScanning.collectAsState()
     val pairing         by viewModel.pairingState.collectAsState()
+    val needsSafGrant   by viewModel.needsSafGrant.collectAsState()
 
     val hasPending   = logs.any { it.uploadStatus == UploadStatus.PENDING }
     val hasSynced    = logs.any { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
@@ -181,6 +183,7 @@ fun HomeScreen(
                     serverReachable  = serverReachable,
                     connectionError  = connectionError,
                     pairing          = pairing,
+                    needsSafGrant    = needsSafGrant,
                     hasPending       = hasPending,
                     hasErrors        = hasErrors,
                     hasSynced        = hasSynced,
@@ -195,7 +198,8 @@ fun HomeScreen(
                     onDownloadUpdate = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
                     onInstallUpdate  = onInstallUpdate,
                     onDismissUpdate  = { viewModel.dismissUpdate() },
-                    onOpenSettings   = onNavigateToSettings
+                    onOpenSettings   = onNavigateToSettings,
+                    onRequestSafGrant = onRequestSafGrant
                 )
             }
 
@@ -264,6 +268,7 @@ fun HomeScreen(
                 serverReachable   = serverReachable,
                 connectionError   = connectionError,
                 pairing           = pairing,
+                needsSafGrant     = needsSafGrant,
                 hasPending        = hasPending,
                 hasErrors         = hasErrors,
                 hasSynced         = hasSynced,
@@ -278,7 +283,8 @@ fun HomeScreen(
                 onDownloadUpdate  = { viewModel.downloadUpdate(context.cacheDir, onInstallUpdate) },
                 onInstallUpdate   = onInstallUpdate,
                 onDismissUpdate   = { viewModel.dismissUpdate() },
-                onOpenSettings    = onNavigateToSettings
+                onOpenSettings    = onNavigateToSettings,
+                onRequestSafGrant = onRequestSafGrant
             )
 
             StatusBar(statusMessage)
@@ -317,6 +323,7 @@ private fun HeroContent(
     serverReachable: Boolean?,
     connectionError: String?,
     pairing: MainViewModel.PairingState,
+    needsSafGrant: Boolean,
     hasPending: Boolean,
     hasErrors: Boolean,
     hasSynced: Boolean,
@@ -331,7 +338,8 @@ private fun HeroContent(
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: (String) -> Unit,
     onDismissUpdate: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onRequestSafGrant: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -394,6 +402,16 @@ private fun HeroContent(
                 message = pairing.message,
                 onOpenSettings = onOpenSettings
             )
+            Spacer(Modifier.height(14.dp))
+        }
+
+        // ── SAF folder-grant banner (ADR-0005) ──────────────────────────────
+        // Shown on Android 11+ when no SAF tree URI has been granted AND the
+        // Legacy permissive-OEM fallback didn't succeed. Tapping launches
+        // the system Documents UI pre-seeded to the DJI Fly FlightRecord
+        // directory.
+        if (needsSafGrant) {
+            SafGrantBanner(onRequestGrant = onRequestSafGrant)
             Spacer(Modifier.height(14.dp))
         }
 
@@ -561,6 +579,54 @@ private fun HeroContent(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp,
                     fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+// ── SAF folder-grant banner (ADR-0005) ────────────────────────────────────────
+@Composable
+private fun SafGrantBanner(onRequestGrant: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(0.82f),
+        colors = CardDefaults.cardColors(containerColor = DocAmber.copy(alpha = 0.10f)),
+        border = BorderStroke(2.dp, DocAmber),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(
+                "FOLDER ACCESS REQUIRED",
+                color = DocAmber,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.8.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "DJI Fly logs need a one-time folder grant — tap to allow.",
+                color = DocAmber.copy(alpha = 0.85f),
+                fontSize = 12.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onRequestGrant,
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DocAmber)
+            ) {
+                Icon(
+                    Icons.Default.FolderOpen,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = DocDeep
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "GRANT FOLDER ACCESS",
+                    color = DocDeep,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    letterSpacing = 0.8.sp
                 )
             }
         }
