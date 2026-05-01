@@ -4,6 +4,27 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Fixed — DJI flight-log scanning on the new RC Pro 2 (ADR-0004)
+
+The new DJI RC Pro 2 controller (Mavic 4 Pro Creators Combo) ships with stock-AOSP Android 11. With `targetSdk 35` the OS silently blocked reads of `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord/`, so the scan returned zero logs even though the files were sitting there. The same target-SDK regression had been hiding on every AOSP-strict Android 11+ device — the Samsung S25 Ultra masked it because Samsung's `MANAGE_EXTERNAL_STORAGE` impl ignores the AOSP `Android/data/<other-pkg>` lockdown, and the old RC Pro masked it because pre-Android-11 has no lockdown at all.
+
+- `android/app/build.gradle` — `targetSdk 35` → **`targetSdk 29`** (one-line change). Engages Android 11's legacy-storage carve-out: apps targeting SDK ≤ 29 with `android:requestLegacyExternalStorage="true"` (already in our manifest) get pre-scoped-storage behavior on Android 11, including full `/sdcard` access. `compileSdk` stays at 35 so AndroidX / Compose BOM 2024.12.01 / AGP 8.13.2 are unaffected.
+- No Kotlin changes. The runtime permission flow in `MainActivity.onCreate` already requests `MANAGE_EXTERNAL_STORAGE` on Android 11+ via `Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`, which is the right intent to pair with the carve-out. Android ≤ 10 path still requests `READ_EXTERNAL_STORAGE` + `WRITE_EXTERNAL_STORAGE`.
+- OTA install path (`MainViewModel.downloadUpdate` → `cacheDir` → `FileProvider`) is target-SDK-independent — verified untouched.
+
+**Device matrix after this change:**
+
+| Device                         | Android | Status                                           |
+|--------------------------------|---------|--------------------------------------------------|
+| Old DJI RC Pro                 | 7 / 9   | Continues to work (no lockdown pre-11)           |
+| Samsung S25 Ultra              | 15      | Continues to work (Samsung MES is permissive)    |
+| **New DJI RC Pro 2**           | **11**  | **Fixed** — carve-out restores `/sdcard` reads   |
+| Future RC Pro 2 on Android 12+ | 12+     | Will break again (carve-out gone); see ADR-0004 §"Future-fix trigger" — likely Shizuku, MSDK ingestion, or rooted helper. DJI rarely upgrades controller Android versions, so this is a multi-year horizon, not a stopgap. |
+
+**Rollback:** revert the single-line gradle change. No data migration, no manifest change, no Kotlin change.
+
+ADR: [`docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md`](docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md). Branch: `claude/targetsdk-29-rc-pro-2-storage`. PR opens against `main` per the standard DroneOpsSync flow; CI auto-bumps the version on merge.
+
 ### Added — zero-touch device API key rotation client (ADR-0002)
 
 Paired with DroneOpsCommand v2.63.6 (ADR-0003). When the operator rotates a device's API key on the server, the paired RC Pro picks up the new key automatically on its next preflight call — no manual paste.
