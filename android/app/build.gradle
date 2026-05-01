@@ -34,14 +34,7 @@ android {
     defaultConfig {
         applicationId "com.droneopssync.app"
         minSdk 26
-        // targetSdk 29 (Android 10) is intentional, NOT stale.
-        // The DJI RC Pro 2 (Android 11, AOSP-strict) blocks reads of
-        // /storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord/ for
-        // any app targeting SDK >= 30. Targeting SDK 29 + the manifest's
-        // android:requestLegacyExternalStorage="true" engages Android 11's
-        // legacy-storage carve-out, restoring full /sdcard access. See
-        // docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md.
-        targetSdk 29
+        targetSdk 35
         versionCode providers.of(GitCommitCount) {}.get()
         versionName versionProps['VERSION_NAME']
     }
@@ -102,6 +95,10 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
     implementation 'androidx.activity:activity-compose:1.9.3'
+    // SAF tree-picker traversal (ADR-0005). DocumentFile wraps tree URIs
+    // so we can list children without re-implementing DocumentsContract
+    // queries against the content provider.
+    implementation 'androidx.documentfile:documentfile:1.0.1'
 
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-tooling-preview'

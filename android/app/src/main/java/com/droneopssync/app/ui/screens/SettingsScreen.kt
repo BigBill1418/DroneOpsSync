@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Visibility
@@ -34,13 +35,15 @@ import com.droneopssync.app.viewmodel.MainViewModel
 fun SettingsScreen(
     viewModel: MainViewModel,
     prefs: SharedPreferences,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onRequestSafGrant: () -> Unit = {}
 ) {
     val currentServerUrl  by viewModel.serverUrl.collectAsState()
     val currentApiKey     by viewModel.apiKey.collectAsState()
     val currentLogPaths   by viewModel.logPathsText.collectAsState()
     val updateState       by viewModel.updateState.collectAsState()
     val autoSyncEnabled   by viewModel.autoSyncEnabled.collectAsState()
+    val safTreeUri        by viewModel.safTreeUri.collectAsState()
 
     var serverUrl by remember(currentServerUrl) { mutableStateOf(currentServerUrl) }
     var apiKey    by remember(currentApiKey)    { mutableStateOf(currentApiKey) }
@@ -186,6 +189,54 @@ fun SettingsScreen(
                         cursorColor          = DocCyan
                     )
                 )
+            }
+
+            HorizontalDivider(color = DocDivider)
+
+            // ── Flight log folder access (ADR-0005, Android 11+) ──────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Flight Log Folder Access", color = DocCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    "On Android 11+ controllers (e.g. DJI RC Pro 2) the OS requires a one-time " +
+                    "folder grant to read DJI Fly's flight logs. Re-grant if you reset the controller " +
+                    "or want to point at a different folder.",
+                    color = DocMuted,
+                    fontSize = 13.sp
+                )
+                if (safTreeUri != null) {
+                    Text(
+                        "Granted: ${safTreeUri.toString().take(120)}",
+                        color = DocGreen,
+                        fontSize = 11.sp
+                    )
+                } else {
+                    Text(
+                        "Not granted",
+                        color = DocAmber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                OutlinedButton(
+                    onClick = onRequestSafGrant,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, DocCyan.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = DocCyan
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (safTreeUri == null) "GRANT FLIGHT LOG FOLDER" else "RE-GRANT FLIGHT LOG FOLDER",
+                        color = DocCyan,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
             }
 
             HorizontalDivider(color = DocDivider)

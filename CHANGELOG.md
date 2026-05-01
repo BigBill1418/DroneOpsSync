@@ -4,26 +4,34 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
-### Fixed — DJI flight-log scanning on the new RC Pro 2 (ADR-0004)
+### Fixed — DJI flight-log scanning on the RC Pro 2 via SAF (ADR-0005, supersedes ADR-0004)
 
-The new DJI RC Pro 2 controller (Mavic 4 Pro Creators Combo) ships with stock-AOSP Android 11. With `targetSdk 35` the OS silently blocked reads of `/storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord/`, so the scan returned zero logs even though the files were sitting there. The same target-SDK regression had been hiding on every AOSP-strict Android 11+ device — the Samsung S25 Ultra masked it because Samsung's `MANAGE_EXTERNAL_STORAGE` impl ignores the AOSP `Android/data/<other-pkg>` lockdown, and the old RC Pro masked it because pre-Android-11 has no lockdown at all.
+5th attempt — landed. The `MANAGE_EXTERNAL_STORAGE` and `targetSdk 29 + requestLegacyExternalStorage` paths both fail on stock-AOSP Android 11+: Google's docs are explicit that MES does not grant access to `Android/data/<other-pkg>`, and the legacy-storage flag honors the same lockdown. v1.3.26 shipped the targetSdk regression and confirmed empty on the RC Pro 2 in the field. This release reverts that hack and adds a Storage Access Framework tree-picker as the primary scan path on Android 11+ — the approach AirData ships in production on the same controller, and the same pattern Material Files / MiXplorer / Solid Explorer / X-plore / Total Commander / FV File Explorer all use.
 
-- `android/app/build.gradle` — `targetSdk 35` → **`targetSdk 29`** (one-line change). Engages Android 11's legacy-storage carve-out: apps targeting SDK ≤ 29 with `android:requestLegacyExternalStorage="true"` (already in our manifest) get pre-scoped-storage behavior on Android 11, including full `/sdcard` access. `compileSdk` stays at 35 so AndroidX / Compose BOM 2024.12.01 / AGP 8.13.2 are unaffected.
-- No Kotlin changes. The runtime permission flow in `MainActivity.onCreate` already requests `MANAGE_EXTERNAL_STORAGE` on Android 11+ via `Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`, which is the right intent to pair with the carve-out. Android ≤ 10 path still requests `READ_EXTERNAL_STORAGE` + `WRITE_EXTERNAL_STORAGE`.
-- OTA install path (`MainViewModel.downloadUpdate` → `cacheDir` → `FileProvider`) is target-SDK-independent — verified untouched.
+- `android/app/build.gradle` — **`targetSdk 29` → `targetSdk 35`** (revert ADR-0004) + adds `androidx.documentfile:documentfile:1.0.1` for tree-URI traversal.
+- New `android/app/src/main/java/com/droneopssync/app/storage/FlightLogSource.kt` — sealed interface + two implementations:
+  - `LegacyFileSource(paths)` — wraps the prior `File.listFiles()` logic. Used on Android ≤ 10 and on permissive OEMs (Samsung S25 Ultra) where MES bypasses the AOSP lockdown.
+  - `SafTreeSource(treeUri, context)` — walks `DocumentFile.fromTreeUri(...).listFiles()`, copies each matching child into `cacheDir/saf-staging/<safe-name>`, returns the same `List<FlightLog>` shape the upload pipeline already consumes.
+- `MainActivity.kt` — registers `OpenDocumentTree()` launcher pre-seeded via `EXTRA_INITIAL_URI` to `primary:Android/data/dji.go.v5/files/FlightRecord` (built with `DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", ...)`) so the picker lands the operator one tap away from "Use this folder." On result, calls `takePersistableUriPermission(uri, FLAG_GRANT_READ_URI_PERMISSION)` and persists the URI under `PREF_SAF_FLIGHT_LOG_URI` in `SharedPreferences`. Survives reboots per the `UriPermission` API contract.
+- `MainViewModel.kt` — new `safTreeUri: StateFlow<Uri?>` and `needsSafGrant: StateFlow<Boolean>`. `performScan()` now dispatches: `if SDK >= 30 && safUri != null → SafTreeSource else → LegacyFileSource`. When Legacy succeeds on Android 11+ (Samsung path), `_needsSafGrant` is lowered automatically — no nagging. New `cleanupSafCacheFile(log)` deletes the staging file after upload SYNCED/DUPLICATE; `deleteSynced()` uses `DocumentsContract.deleteDocument(...)` for SAF-sourced entries so the original on the controller (not just our cache copy) is removed.
+- `model/FlightLog.kt` — additive `sourceUri: Uri? = null` field. Existing call sites compile unchanged; upload still keys off `file: File`.
+- `ui/screens/HomeScreen.kt` — new `SafGrantBanner` shown above the status badge when `needsSafGrant` is true: *"DJI Fly logs need a one-time folder grant — tap to allow."*
+- `ui/screens/SettingsScreen.kt` — new "GRANT FLIGHT LOG FOLDER" / "RE-GRANT FLIGHT LOG FOLDER" section between Flight Log Paths and Auto Sync, displaying the granted tree URI when present.
+- Manifest unchanged — `MANAGE_EXTERNAL_STORAGE` and `requestLegacyExternalStorage="true"` are kept for the Samsung-permissive Legacy fallback. SAF grants are per-URI and don't require manifest declaration.
+- Diag (`[SCAN]`, `[PERM]`) now records: source label per scan (`LEGACY` vs `SAF`), the persisted SAF URI on app startup, per-file SAF entries with name + size matching the existing legacy log format. This is the canary if the empirical test on Bill's RC Pro 2 fails for an unanticipated reason.
 
 **Device matrix after this change:**
 
-| Device                         | Android | Status                                           |
-|--------------------------------|---------|--------------------------------------------------|
-| Old DJI RC Pro                 | 7 / 9   | Continues to work (no lockdown pre-11)           |
-| Samsung S25 Ultra              | 15      | Continues to work (Samsung MES is permissive)    |
-| **New DJI RC Pro 2**           | **11**  | **Fixed** — carve-out restores `/sdcard` reads   |
-| Future RC Pro 2 on Android 12+ | 12+     | Will break again (carve-out gone); see ADR-0004 §"Future-fix trigger" — likely Shizuku, MSDK ingestion, or rooted helper. DJI rarely upgrades controller Android versions, so this is a multi-year horizon, not a stopgap. |
+| Device                       | Android | Path used                          | Status                         |
+|------------------------------|---------|------------------------------------|--------------------------------|
+| Old DJI RC Pro               | 7 / 9   | Legacy `File.listFiles`            | Works (no lockdown pre-11)     |
+| Samsung S25 Ultra            | 15      | Legacy via permissive Samsung MES  | Works (no SAF prompt shown)    |
+| **New DJI RC Pro 2**         | **11**  | **SAF tree-picker (one-time grant)** | **Fixed**                    |
+| Future RC Pro 2 on Android 13+ | 13+   | SAF closed at AOSP                 | Future ADR (Shizuku candidate) |
 
-**Rollback:** revert the single-line gradle change. No data migration, no manifest change, no Kotlin change.
+**Rollback:** revert this PR. ADR-0004's targetSdk regression is also reverted as part of this change; rolling back drops the SAF code AND restores targetSdk 35 — there is no intermediate state worth reverting to.
 
-ADR: [`docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md`](docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md). Branch: `claude/targetsdk-29-rc-pro-2-storage`. PR opens against `main` per the standard DroneOpsSync flow; CI auto-bumps the version on merge.
+ADR: [`docs/adr/0005-saf-tree-picker-for-dji-flight-logs.md`](docs/adr/0005-saf-tree-picker-for-dji-flight-logs.md). ADR-0004 marked superseded. Research: `docs/research/2026-05-01-android-11-saf-authoritative.md`. Branch: `claude/saf-flight-log-rc-pro-2`. PR opens against `main` per the standard DroneOpsSync flow; CI auto-bumps the version on merge.
 
 ### Added — zero-touch device API key rotation client (ADR-0002)
 
