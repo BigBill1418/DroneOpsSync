@@ -34,7 +34,14 @@ android {
     defaultConfig {
         applicationId "com.droneopssync.app"
         minSdk 26
-        targetSdk 35
+        // targetSdk 29 (Android 10) is intentional, NOT stale.
+        // The DJI RC Pro 2 (Android 11, AOSP-strict) blocks reads of
+        // /storage/emulated/0/Android/data/dji.go.v5/files/FlightRecord/ for
+        // any app targeting SDK >= 30. Targeting SDK 29 + the manifest's
+        // android:requestLegacyExternalStorage="true" engages Android 11's
+        // legacy-storage carve-out, restoring full /sdcard access. See
+        // docs/adr/0004-targetsdk-29-regression-for-rc-pro-2-flight-log-access.md.
+        targetSdk 29
         versionCode providers.of(GitCommitCount) {}.get()
         versionName versionProps['VERSION_NAME']
     }
