@@ -4,6 +4,20 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Fixed — SAF persisted grant must include WRITE for delete-on-controller (ADR-0006, amends ADR-0005)
+
+v1.3.27 (ADR-0005) shipped the SAF tree-picker as the RC Pro 2 scan path and promised post-upload `deleteSynced()` would remove the original on the controller via `DocumentsContract.deleteDocument(...)`. The picker took the persistable grant with `FLAG_GRANT_READ_URI_PERMISSION` only, no WRITE; the delete call therefore raised `SecurityException` once the process restarted and the in-memory grant was gone. The exception was swallowed by `runCatching{}.getOrDefault(false)`, so the user-facing toast read `"$deleted deleted, $failed could not be removed (may already be gone)"` — phrasing the operator (Bill, on the RC Pro 2) reasonably interpreted as "the system thinks it deleted them" while the files were still on the controller and got re-scanned as PENDING.
+
+- `android/app/src/main/java/com/droneopssync/app/MainActivity.kt` — new private `OpenDocumentTreeWithWrite` subclass of `ActivityResultContracts.OpenDocumentTree` whose `createIntent` ORs `FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION` onto the picker intent (the default contract attaches neither); `takePersistableUriPermission(uri, READ | WRITE)` instead of READ-only. New launcher registered through the subclass.
+- `android/app/src/main/java/com/droneopssync/app/viewmodel/MainViewModel.kt::loadSettings` — after parsing the persisted URI, checks `contentResolver.persistedUriPermissions` for the granted URI and, if `isWritePermission == false`, emits a `[PERM]` WARN, clears `PREF_SAF_FLIGHT_LOG_URI` from `SharedPreferences`, and nulls `_safTreeUri`. The existing `_needsSafGrant` assignment re-raises the home-screen banner so the operator re-completes the grant once — the new picker takes WRITE.
+- `android/app/src/main/java/com/droneopssync/app/viewmodel/MainViewModel.kt::deleteSafDocument` — silent `runCatching{}.getOrDefault(false)` replaced with explicit `try / catch(SecurityException) / catch(Exception)` that emits ERROR entries on a new `[DELETE]` diag channel. The `false`-return path (provider acknowledged the call but refused) also logs a `[DELETE]` WARN.
+- `android/app/src/main/java/com/droneopssync/app/viewmodel/MainViewModel.kt::deleteSynced` — status-message phrasing reworked so partial failure no longer reads as success. All-failed now reads `"Delete failed for $failed file(s) — check Diagnostics ([DELETE] channel)"`; partial reads `"$deleted deleted, $failed could not be removed — see Diagnostics"`.
+- No manifest change, no version bump in this PR (CI auto-bumps on tag). No new dependency — `androidx.documentfile:documentfile:1.0.1` from ADR-0005 is sufficient.
+
+**Operator impact on upgrade:** the SAF banner reappears once on first launch of this build for any device whose v1.3.27 grant is READ-only; one tap re-completes the grant with WRITE included. Subsequent SYNC ALL → DELETE actually removes the originals from the controller.
+
+ADR: [`docs/adr/0006-saf-grant-must-include-write-flag-for-delete.md`](docs/adr/0006-saf-grant-must-include-write-flag-for-delete.md). Amends ADR-0005 (which remains accepted; the SAF approach is correct — only the grant model needed the fix). Branch: `claude/saf-flight-log-rc-pro-2`.
+
 ### Fixed — DJI flight-log scanning on the RC Pro 2 via SAF (ADR-0005, supersedes ADR-0004)
 
 5th attempt — landed. The `MANAGE_EXTERNAL_STORAGE` and `targetSdk 29 + requestLegacyExternalStorage` paths both fail on stock-AOSP Android 11+: Google's docs are explicit that MES does not grant access to `Android/data/<other-pkg>`, and the legacy-storage flag honors the same lockdown. v1.3.26 shipped the targetSdk regression and confirmed empty on the RC Pro 2 in the field. This release reverts that hack and adds a Storage Access Framework tree-picker as the primary scan path on Android 11+ — the approach AirData ships in production on the same controller, and the same pattern Material Files / MiXplorer / Solid Explorer / X-plore / Total Commander / FV File Explorer all use.

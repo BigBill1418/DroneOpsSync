@@ -1,6 +1,7 @@
 package com.droneopssync.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -42,16 +43,22 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* nothing to do */ }
 
     // ── ADR-0005: SAF tree-picker for DJI flight logs on AOSP-strict Android 11+ ─
+    // ── ADR-0006: persisted grant MUST include WRITE so DocumentsContract.delete
+    //              succeeds after process restart (the result intent default omits
+    //              FLAG_GRANT_WRITE_URI_PERMISSION, so we both subclass the
+    //              contract to add it to the launch intent AND request the
+    //              persistable take with both READ + WRITE).
     // Result is the user-selected directory URI. We persist it across reboots
     // via takePersistableUriPermission; the ViewModel reads it on next scan.
     private val openTreeLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        registerForActivityResult(OpenDocumentTreeWithWrite()) { uri: Uri? ->
             if (uri == null) {
                 // User cancelled. Banner stays visible; ViewModel's
                 // _needsSafGrant remains true.
                 return@registerForActivityResult
             }
-            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             try {
                 contentResolver.takePersistableUriPermission(uri, flags)
             } catch (e: SecurityException) {
@@ -228,6 +235,22 @@ class MainActivity : ComponentActivity() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    /**
+     * ADR-0006: `ActivityResultContracts.OpenDocumentTree.createIntent` does
+     * not attach FLAG_GRANT_WRITE_URI_PERMISSION to the picker intent, so
+     * the resulting grant is READ-only and `DocumentsContract.deleteDocument`
+     * fails with SecurityException after the process restarts. Subclass and
+     * add both READ + WRITE flags so the persistable grant we take includes
+     * write capability.
+     */
+    private class OpenDocumentTreeWithWrite : ActivityResultContracts.OpenDocumentTree() {
+        override fun createIntent(context: Context, input: Uri?): Intent =
+            super.createIntent(context, input).addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
     }
 
     companion object {

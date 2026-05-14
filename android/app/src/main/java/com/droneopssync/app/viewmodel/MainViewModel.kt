@@ -356,6 +356,14 @@ class MainViewModel : ViewModel() {
         // here — a stale entry (revoked grant, deleted directory) is
         // surfaced to the operator via the banner instead of silently
         // failing on the next scan.
+        //
+        // ADR-0006: also verify the persisted grant carries WRITE
+        // permission. v1.3.27 (ADR-0005) took the grant with READ only,
+        // so DocumentsContract.deleteDocument silently fails after a
+        // process restart. If we detect a READ-only persisted grant we
+        // clear it and force the operator through the picker once more
+        // — the new launcher (OpenDocumentTreeWithWrite) takes both
+        // flags.
         val safRaw = prefs.getString(PREF_SAF_FLIGHT_LOG_URI, null)
         if (safRaw.isNullOrBlank()) {
             _safTreeUri.value = null
@@ -370,6 +378,21 @@ class MainViewModel : ViewModel() {
                 }.getOrDefault(false)
                 if (!resolvable) {
                     diag(DiagLevel.WARN, "PERM", "SAF tree URI no longer resolvable — re-grant required")
+                }
+                // ADR-0006: WRITE-flag check. If the persisted grant
+                // lacks WRITE, post-upload delete will silently fail.
+                // Forget the grant and re-prompt.
+                val perm = runCatching {
+                    appContext!!.contentResolver.persistedUriPermissions
+                        .firstOrNull { it.uri == parsed }
+                }.getOrNull()
+                if (perm != null && !perm.isWritePermission) {
+                    diag(
+                        DiagLevel.WARN, "PERM",
+                        "Persisted SAF grant is READ-only (ADR-0006) — clearing and forcing re-grant for delete-on-controller"
+                    )
+                    prefs.edit().remove(PREF_SAF_FLIGHT_LOG_URI).apply()
+                    _safTreeUri.value = null
                 }
             }
         }
@@ -867,10 +890,10 @@ class MainViewModel : ViewModel() {
                     failed++
                 }
             }
-            _statusMessage.value = if (failed == 0) {
-                "$deleted file(s) deleted from controller"
-            } else {
-                "$deleted deleted, $failed could not be removed (may already be gone)"
+            _statusMessage.value = when {
+                failed == 0 -> "$deleted file(s) deleted from controller"
+                deleted == 0 -> "Delete failed for $failed file(s) — check Diagnostics ([DELETE] channel)"
+                else -> "$deleted deleted, $failed could not be removed — see Diagnostics"
             }
         }
     }
@@ -879,12 +902,33 @@ class MainViewModel : ViewModel() {
      * ADR-0005: delete a SAF-sourced document on the controller via the
      * persisted tree grant. Returns true if the provider confirmed the
      * delete, false on any error (revoked grant, missing file, IO).
+     *
+     * ADR-0006: surface the previously-swallowed failure. The grant must
+     * carry WRITE permission (see launcher + loadSettings) — without it,
+     * deleteDocument raises SecurityException. We log the cause via the
+     * `[DELETE]` channel so the operator can verify in Diagnostics.
      */
     private fun deleteSafDocument(uri: Uri): Boolean {
         val ctx = appContext ?: return false
-        return runCatching {
-            android.provider.DocumentsContract.deleteDocument(ctx.contentResolver, uri)
-        }.getOrDefault(false)
+        return try {
+            val ok = android.provider.DocumentsContract.deleteDocument(ctx.contentResolver, uri)
+            if (!ok) {
+                diag(DiagLevel.WARN, "DELETE", "DocumentsContract.deleteDocument returned false for $uri")
+            }
+            ok
+        } catch (e: SecurityException) {
+            diag(
+                DiagLevel.ERROR, "DELETE",
+                "SecurityException deleting $uri — persisted grant missing WRITE? (${e.message?.take(120)})"
+            )
+            false
+        } catch (e: Exception) {
+            diag(
+                DiagLevel.ERROR, "DELETE",
+                "${e.javaClass.simpleName} deleting $uri: ${e.message?.take(120)}"
+            )
+            false
+        }
     }
 
     /**

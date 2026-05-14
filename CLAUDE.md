@@ -71,11 +71,20 @@ CI takes it from there: bump → build → publish release automatically.
 - `DiagScreen` — low-level network/scan/upload log
 - `SplashScreen` — 1.6 s animated intro
 
-**Permissions**
+**Permissions / storage-access model**
 - `INTERNET` — upload and OTA
 - `ACCESS_NETWORK_STATE` — `ConnectivityManager` callback for auto-sync on connect
-- Android 11+: `MANAGE_EXTERNAL_STORAGE` (All Files Access) — required to read DJI log paths
-- Android ≤10: `READ_EXTERNAL_STORAGE` + `WRITE_EXTERNAL_STORAGE`
+- Android ≤10: `READ_EXTERNAL_STORAGE` + `WRITE_EXTERNAL_STORAGE` (legacy controllers)
+- Android 11+ controllers (RC Pro 2 / DJI Fly path / any `Android/data/<other-pkg>`): **Storage Access Framework tree-picker** (ADR-0005). The persisted grant carries both `FLAG_GRANT_READ_URI_PERMISSION` and `FLAG_GRANT_WRITE_URI_PERMISSION` (ADR-0006) — read for scan, write for `DocumentsContract.deleteDocument`. `MANAGE_EXTERNAL_STORAGE` is still declared in the manifest as a fallback for legacy paths but does NOT grant access to `Android/data/<other-pkg>` on stock-AOSP Android 11+ (Google's lockdown, no workaround short of Shizuku).
+- `requestLegacyExternalStorage="true"` is retained in the manifest but is dead-flagged at `targetSdk 35` — the OS only honors it at `targetSdk <= 29`. Harmless but cosmetic.
+
+**Diag channels** (`DiagScreen` / Settings → Diagnostics)
+- `[SCAN]` — scan dispatch and per-file findings (source=SAF | source=Legacy)
+- `[NETWORK]` — health-check + upload-call lifecycle
+- `[UPLOAD]` — per-file upload status transitions
+- `[PERM]` — SAF grant acquisition and the WRITE-flag canary on startup (`loadSettings`)
+- `[DELETE]` — `deleteSafDocument` outcomes; ERROR on `SecurityException` (WRITE missing or provider revoked) or other exception, WARN on `false`-return (provider acknowledged but refused — race with file-already-gone, etc.). Replaces the silent `runCatching{}.getOrDefault(false)` that hid the original ADR-0005 → ADR-0006 regression.
+- `[OTA]` — update-check and download lifecycle
 
 **Remote access**
 The server URL accepts any reachable address — LAN IP, WireGuard peer IP, or a public HTTPS endpoint. The app makes plain HTTP/S POST requests; transport security is handled at the network layer (WireGuard VPN or TLS termination on the server). No app changes are required to switch between local and remote access — update the server URL in Settings.
