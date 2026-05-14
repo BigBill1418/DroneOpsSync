@@ -6,7 +6,10 @@
 - **Amends:** ADR-0005 (does NOT supersede — the SAF approach is correct;
   this ADR fixes the grant model only)
 - **Related:** `android/app/src/main/java/com/droneopssync/app/MainActivity.kt`,
-  `android/app/src/main/java/com/droneopssync/app/viewmodel/MainViewModel.kt`
+  `android/app/src/main/java/com/droneopssync/app/viewmodel/MainViewModel.kt`,
+  [`docs/adr/0005-saf-tree-picker-for-dji-flight-logs.md`](0005-saf-tree-picker-for-dji-flight-logs.md),
+  [`docs/research/2026-05-01-android-11-saf-authoritative.md`](../research/2026-05-01-android-11-saf-authoritative.md),
+  [`docs/research/2026-05-01-rc-pro-2-deep-dive-competitors.md`](../research/2026-05-01-rc-pro-2-deep-dive-competitors.md)
 
 ---
 

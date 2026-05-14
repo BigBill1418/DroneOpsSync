@@ -71,6 +71,16 @@ Open DroneOpsSync on the controller, tap the **Settings** (gear) icon, and enter
 
 Tap **Save**. The status indicator will turn green when the server is reachable.
 
+### Step 4 — Grant Flight Log Folder (RC Pro 2 / Android 11+ only)
+
+On the DJI RC Pro 2 (stock-AOSP Android 11) and any other Android 11+ controller, the OS sandboxes `Android/data/<other-pkg>` directories — `MANAGE_EXTERNAL_STORAGE` does not grant access to them. DroneOpsSync uses the system **Storage Access Framework (SAF)** picker as a one-time grant per install.
+
+On first launch, the home screen shows a "DJI Fly logs need a one-time folder grant" banner. Tap it, and the SAF picker opens pre-seeded at the DJI flight-record folder. Tap **Use this folder** to grant.
+
+The grant is persisted across launches with both **read and write** access — read for scanning, write for delete-after-sync to actually remove the original from the controller. See [ADR-0005](docs/adr/0005-saf-tree-picker-for-dji-flight-logs.md) and [ADR-0006](docs/adr/0006-saf-grant-must-include-write-flag-for-delete.md).
+
+If a delete ever reports failure, open **Diagnostics** and look at the `[DELETE]` channel — it now names the exact provider response.
+
 ---
 
 ## Sync Flow
