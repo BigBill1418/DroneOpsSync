@@ -2,6 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-01
+- **Amended 2026-05-14 by ADR-0006:** the persisted SAF grant must
+  include `FLAG_GRANT_WRITE_URI_PERMISSION` for the `deleteSynced()`
+  path to actually remove originals on the controller. The picker code
+  in this ADR took READ only, which silently failed delete after
+  process restart. See
+  [`docs/adr/0006-saf-grant-must-include-write-flag-for-delete.md`](0006-saf-grant-must-include-write-flag-for-delete.md).
 - **Owners:** Bill (operator), Aegis (implementation)
 - **Supersedes:** ADR-0004 (`targetSdk` 35 → 29 regression)
 - **Related:** `android/app/src/main/java/com/droneopssync/app/storage/FlightLogSource.kt`,

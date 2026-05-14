@@ -33,6 +33,7 @@
 
 ## Near-term follow-ups (post-v1.3.25)
 
+- **v1.3.28 hotfix (ADR-0006) — SAF persisted grant must include WRITE for delete-on-controller.** Fix lands on `claude/saf-flight-log-rc-pro-2` on top of ADR-0005's commit `7f8e5d9`. Operator-observable regression: post-upload DELETE returned `"$deleted deleted, $failed could not be removed (may already be gone)"` while files remained on the RC Pro 2. Root cause: picker took READ-only grant; `DocumentsContract.deleteDocument` raised `SecurityException` after process restart; caught by silent `runCatching{}.getOrDefault(false)`. Fix: `OpenDocumentTreeWithWrite` subclass adds WRITE to picker intent + `takePersistableUriPermission(READ | WRITE)`; startup `[PERM]` check forces re-grant on existing READ-only installs; new `[DELETE]` diag channel surfaces previously-swallowed exceptions. CI auto-bumps to v1.3.28 on merge. See ADR-0006.
 - **FU-1** — unit tests for `ApiClient.normalizeUrl` covering LAN carve-out, HTTPS coercion, path stripping. Not blocking ship; belongs in a follow-up PR.
 - **FU-2** — consider whether `checkServerHealth` (unauthenticated `/api/health`) is still needed now that `preflightHealth` (authenticated `/device-health`) is the gate. Possibly collapse to one call.
 - **FU-3** — persistent telemetry of first-install version + last-active timestamp, so a future "which devices are on which version?" question doesn't require an all-hands APK audit. Could ride on the same `/device-health` response.

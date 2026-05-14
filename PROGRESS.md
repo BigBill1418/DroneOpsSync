@@ -2,6 +2,46 @@
 
 Session-by-session notes. Most recent first.
 
+## 2026-05-14 — SAF persisted-grant WRITE-flag fix (aegis; ADR-0006)
+
+Branch `claude/saf-flight-log-rc-pro-2` (which carries ADR-0005 at `7f8e5d9`) gets a follow-up commit fixing the silent delete-on-controller failure surfaced by the operator on the DJI RC Pro 2.
+
+### Root cause (Terry, verified from code at HEAD)
+
+- `MainActivity.kt:54` took the persistable URI grant with `FLAG_GRANT_READ_URI_PERMISSION` only — no WRITE.
+- `MainViewModel.kt:886` then called `DocumentsContract.deleteDocument(ctx.contentResolver, uri)` against that read-only grant.
+- The `SecurityException` was swallowed by `runCatching{}.getOrDefault(false)`; `deleteSafDocument` returned `false`; per-row UploadStatus correctly stayed non-DELETED, but the status toast read `"$deleted deleted, $failed could not be removed (may already be gone)"` — phrasing the operator interpreted as "the system thinks it deleted them, but they're still on disk."
+
+### Completed
+
+- **MainActivity.kt** — new private `OpenDocumentTreeWithWrite` subclass of `ActivityResultContracts.OpenDocumentTree` whose `createIntent` adds `FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION` to the launch intent. Launcher registered through the subclass. `takePersistableUriPermission(uri, READ | WRITE)`. `import android.content.Context` added (the subclass signature requires it).
+- **MainViewModel.kt::loadSettings** — WRITE-flag check on the persisted grant via `contentResolver.persistedUriPermissions.firstOrNull { it.uri == parsed }`. If `isWritePermission == false`, emit `[PERM]` WARN, clear the persisted SAF URI from prefs, null out `_safTreeUri`. The existing `_needsSafGrant.value = SDK_INT >= R && _safTreeUri.value == null` assignment runs immediately after and re-raises the home-screen banner.
+- **MainViewModel.kt::deleteSafDocument** — silent `runCatching{}.getOrDefault(false)` replaced with explicit `try / catch(SecurityException) / catch(Exception)` emitting on a new `[DELETE]` diag channel. The `false`-return path (provider acknowledged the call but refused) logs `[DELETE]` WARN.
+- **MainViewModel.kt::deleteSynced** — status message reworded so partial failure no longer reads as success. New phrasings route the operator to Diagnostics.
+- **ADR-0006** created: `docs/adr/0006-saf-grant-must-include-write-flag-for-delete.md`. Status Accepted. Amends (does not supersede) ADR-0005.
+- **ADR-0005** amended with a one-line "Amended 2026-05-14 by ADR-0006" pointer near the top.
+- **CHANGELOG.md** — new `[Unreleased]` `Fixed` entry above the existing ADR-0005 entry, with the file-level summary + operator impact note.
+- **ROADMAP.md** — v1.3.28 hotfix line added under Near-term follow-ups.
+
+### Build / verification
+
+- Local Gradle build was NOT run in this session (the workspace gradle daemon state was a mess of permission-denied configuration-cache directories from a prior session and gradlew would not be safe to invoke without first cleaning, which is out of scope for this surgical fix). The change is small (one new subclass, four small edits, no API surface change, no new dependency) and lint-clean by inspection: all referenced symbols (`ActivityResultContracts.OpenDocumentTree`, `Context`, `Intent`, `Uri`, `contentResolver.persistedUriPermissions`, `UriPermission.isWritePermission`, `DocumentsContract.deleteDocument`, `DiagLevel.ERROR`, `DiagLevel.WARN`) are already in scope or imported.
+- BOS-HQ self-hosted CI will build the APK on the merge commit; the operator validates on physical hardware after install.
+
+### Operator test plan (post-install on the RC Pro 2)
+
+1. Install this build. Expect the home-screen banner ("DJI Fly logs need a one-time folder grant — tap to allow.") to reappear once — that is ADR-0006's startup `[PERM]` check forcing a re-grant of the now READ-only persisted URI.
+2. Tap the banner, complete the SAF picker once (it should land pre-seeded at the DJI Fly FlightRecord directory).
+3. Open Diagnostics. Expect `[PERM] SAF grant received: ...` and NO subsequent `[PERM] Persisted SAF grant is READ-only...` after a force-stop + relaunch (proves the new grant carries WRITE).
+4. Run SYNC ALL on a controller that has at least one fresh FlightRecord file. Wait for all to flip to SYNCED.
+5. Tap DELETE. Expect the toast `"N file(s) deleted from controller"` with N > 0 and NO `failed` count. Re-scan. Expect zero PENDING entries (the controller-side files are gone).
+6. If any failure: Diagnostics → search for `[DELETE]` channel — the cause is now visible (was previously swallowed). Capture the message; that is the signal the Shizuku ADR-0005:141 trigger has fired.
+
+### Not done in this PR (deliberate)
+
+- No automated test. The `deleteSafDocument` path uses `ContentResolver` + `DocumentsContract` which are framework boundaries; meaningful tests need Robolectric, which this project does not currently use (same reasoning as ADR-0002's PROGRESS note). The fix is small and the operator test on physical hardware is the load-bearing signal.
+- No version bump (CI auto-bumps on tag).
+
 ## 2026-04-24 EVENING — Zero-touch key rotation client (aegis; v1.3.25 PR)
 
 Branch `claude/auto-rotation-client` opened against `main`. Paired with DroneOpsCommand v2.63.6 (ADR-0003).
