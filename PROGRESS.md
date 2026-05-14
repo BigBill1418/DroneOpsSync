@@ -42,6 +42,12 @@ Branch `claude/saf-flight-log-rc-pro-2` (which carries ADR-0005 at `7f8e5d9`) ge
 - No automated test. The `deleteSafDocument` path uses `ContentResolver` + `DocumentsContract` which are framework boundaries; meaningful tests need Robolectric, which this project does not currently use (same reasoning as ADR-0002's PROGRESS note). The fix is small and the operator test on physical hardware is the load-bearing signal.
 - No version bump (CI auto-bumps on tag).
 
+### Session wrap
+
+- **PR #56** opened: `claude/saf-flight-log-rc-pro-2` → `main`. Carries three commits: `7f8e5d9` (ADR-0005 SAF picker), `91cf7d3` (ADR-0006 WRITE-flag fix), `ec6bd10` (research files + README/CLAUDE.md/ADR-0006 cross-refs). https://github.com/BigBill1418/DroneOpsSync/pull/56
+- **OTA delivery confirmed.** Fixed keystore (CLAUDE.md → `KEYSTORE_B64` in GitHub secrets) keeps the signature stable, so the v1.3.28 release APK installs over v1.3.27 without uninstall and preserves both `SharedPreferences` and `contentResolver.persistedUriPermissions`. The new `loadSettings()` WRITE-flag check then sees the surviving READ-only grant, clears it, and re-raises the banner — one operator tap per controller, ever. No sideloading needed.
+- **Known cleanup deferred** (not in PR #56): ~546 build-cache files under `android/.gradle/`, `android/app/build/`, `android/build/reports/` are tracked despite being in `.gitignore` (line 5). Will keep showing as modified on every Gradle run. Fix is `git rm --cached -r` on those trees in its own PR. Pure tidy-up, no behavior change.
+
 ## 2026-04-24 EVENING — Zero-touch key rotation client (aegis; v1.3.25 PR)
 
 Branch `claude/auto-rotation-client` opened against `main`. Paired with DroneOpsCommand v2.63.6 (ADR-0003).
