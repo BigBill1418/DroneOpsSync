@@ -86,10 +86,20 @@ If a delete ever reports failure, open **Diagnostics** and look at the `[DELETE]
 ## Sync Flow
 
 1. **SCAN FOR LOGS** — finds `.txt` / `.log` files in all configured paths
-2. **SYNC ALL** — uploads all pending logs to DroneOpsCommand in a single batch. The server parses them, deduplicates by hash, and imports into the Flight Library.
+2. **SYNC ALL** — uploads all pending logs to DroneOpsCommand. The server parses them, deduplicates by hash, and imports into the Flight Library. Each file is uploaded and tracked independently, so a slow or failed file never blocks the rest of the sortie.
 3. **DELETE** — after confirmation, removes synced files from the controller only
 
 Files are **never deleted automatically** — explicit confirmation is always required.
+
+### Upload reliability — async ingest + per-file isolation
+
+The upload path is resilient to slow field connections and slow server-side log parses:
+
+- **Per-file isolation.** A `SocketTimeoutException` on one file fails *only that file* and the batch continues. Only genuinely batch-wide conditions abort the run: an unreachable host (`UnknownHostException`) or a bad device key (HTTP 401/403). Failed files stay as `ERROR` cards you can long-press or swipe to retry.
+- **Async upload (202 + poll).** When the server advertises `async_upload_available` on the device-health preflight, the client POSTs to `…/device-upload/async`, receives a `202 Accepted` with a `batch_id` (the connection is released as soon as the bytes are uploaded — the parse no longer happens in-request), then polls `…/device-upload/status/{batch_id}` until each file reaches a terminal state. SHA-256 dedup short-circuits files already on the server with no poll.
+- **Graceful fallback.** `async_upload_available` defaults off, so a new APK against an older/legacy DroneOpsCommand transparently uses the unchanged synchronous upload path. Closing the app mid-poll is safe — the job completes server-side and dedup reconciles on the next launch.
+
+Pairs with DroneOpsCommand v2.71.0. See [ADR-0008](docs/adr/0008-device-upload-async-poll-client.md) (client) and DroneOpsCommand ADR-0023 (the canonical cross-repo contract). Live progress is visible in **Diagnostics → `[UPLOAD]`** channel (async submit HTTP code, `batch_id`, poll status).
 
 ---
 
@@ -121,7 +131,16 @@ Pre-configured in the app; additional paths can be added in Settings.
 
 ## Backend Integration
 
-DroneOpsSync talks directly to DroneOpsCommand's `/api/flight-library/device-upload` endpoint over plain HTTP. There is no middleware, relay server, or tunnel required.
+DroneOpsSync talks directly to DroneOpsCommand over plain HTTP. There is no middleware, relay server, or tunnel required. Endpoints used:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/flight-library/device-health` | GET | Preflight — reachability, device-key validity, key-rotation hint, and the `async_upload_available` capability flag |
+| `/api/flight-library/device-upload` | POST | Legacy synchronous upload (parses in-request) — fallback path when the server does not advertise async support |
+| `/api/flight-library/device-upload/async` | POST | Async upload — streams bytes, returns `202 + {batch_id}`, parses off-request |
+| `/api/flight-library/device-upload/status/{batch_id}` | GET | Status poll for an async batch (per-file state) |
+
+The client capability-detects: if the preflight reports `async_upload_available: true`, it uses the async route; otherwise it falls back to the synchronous endpoint.
 
 The DroneOpsCommand stack includes:
 - **`flight-parser`** — Rust service that parses DJI `.txt` log format

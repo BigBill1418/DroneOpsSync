@@ -1,9 +1,13 @@
 # ADR-0008 — Device-upload async poll client + per-file timeout isolation
 
-- **Status:** **Proposed** — design only, no code shipped. Client-side half of
-  the cross-repo device-upload async decoupling (audit P2-2 full leg).
+- **Status:** **Accepted — implemented.** Both stages (§2.1 per-file isolation
+  and §2.2/§2.3 async adoption) shipped together on branch
+  `claude/device-upload-async` (PR #57); released via the next CI auto-bump on
+  merge. Client-side half of the cross-repo device-upload async decoupling
+  (audit P2-2 full leg) — **P2-2 is now closed** (DroneOpsCommand v2.71.0 server
+  leg + this client leg). See §6 for the as-shipped record.
 - **Date:** 2026-06-15
-- **Authors:** Terry (research/architect). Implementation handoff to
+- **Authors:** Terry (research/architect). Implemented by
   fleet-mobile-engineer / aegis.
 - **Scope:** Native Kotlin DroneOpsSync companion app (`android/`) — the upload
   path in `viewmodel/MainViewModel.kt`, the Retrofit service in
@@ -45,12 +49,21 @@ client uses today keeps working forever).
 
 ## 2. Decision
 
+> **As-shipped note (see §6):** the original design proposed §2.1 as a
+> *standalone* release ahead of §2.2/§2.3. In practice both stages shipped
+> together in PR #57. The §2.1 fix still stands on its own and applies to the
+> legacy synchronous path even when the server does not advertise async support;
+> it was simply not released separately.
+
 ### 2.1 Fast-follow first: socket-timeout is per-file, not per-batch
 
-Ship a **standalone APK release before** the async work that makes a single
-line change: in `MainViewModel.performUpload`, the `catch
-(SocketTimeoutException)` block (`:721-725`) **must not** set `aborted = true`.
+Make a single-line change: in `MainViewModel.performUpload`, the `catch
+(SocketTimeoutException)` block **must not** set `aborted = true`.
 Mark the current file `ERROR`, increment `totalErrors`, **continue the loop**.
+As shipped, the inline per-file decision was extracted into the pure
+`classifyUploadOutcome(...)` (`upload/UploadOutcome.kt`) so it is JVM-unit-testable
+(`UploadOutcomeTest`); the classifier returns `abortBatch = false` for
+`SocketTimeoutException`.
 
 Leave `aborted = true` on:
 - `UnknownHostException` (`:716-720`) — host is unreachable; the whole batch is
@@ -124,10 +137,36 @@ fast-follow PR (§2.1) and the async-adoption PR (§2.2/§2.3).
 
 ## 5. Validation
 
-- Fast-follow (§2.1): JVM unit test under
-  `android/app/src/test/java/com/droneopssync/app/` proving a simulated
-  socket-timeout on file *k* leaves files *k+1…M* attemptable (extract the
-  loop's per-file decision into a pure testable function, per the plan).
-- Async adoption (§2.2/§2.3): JVM tests on the poll-envelope parse
-  (mirroring `KeyRotationParseTest`'s Gson-contract style) + the terminal-state
-  reducer; operator confirms end-to-end on a controller after merge.
+- Fast-follow (§2.1): `UploadOutcomeTest` (9 cases) covers
+  `classifyUploadOutcome(...)` — proves `SocketTimeoutException` returns
+  `abortBatch = false` (file *k* fails alone, files *k+1…M* remain attemptable)
+  while `UnknownHostException` and HTTP 401/403 keep `abortBatch = true`.
+- Async adoption (§2.2/§2.3): `PollEnvelopeTest` (11 cases) covers the
+  202/poll Gson-contract parse (`AsyncUploadResponse`, `UploadStatusResponse`,
+  `PerFileStatus`, unknown-field tolerance) and the `reducePerFileState(...)`
+  terminal-state reducer.
+- Operator end-to-end: run a multi-file sortie with one deliberately large
+  record after the release lands; confirm in **Diagnostics → `[UPLOAD]`** that a
+  slow file no longer blocks the others and the submit returns `HTTP 202` with a
+  `batch_id`.
+
+## 6. As-shipped record (2026-06-15, PR #57)
+
+The original design (above) sequenced the work as two releases — a §2.1
+fast-follow first, then §2.2/§2.3 async adoption. **As implemented, both stages
+shipped in a single PR (#57)**, so the §2.1 timeout-isolation fix and the
+§2.3 timeout retune (120 s → upload 30 s / poll 15 s) landed together. This is a
+safe combination because the retune is paired with the async route in the same
+build and the §2.1 fix applies to the synchronous fallback path regardless.
+
+Files delivered:
+
+- `upload/UploadOutcome.kt` — pure `classifyUploadOutcome(...)` + `reducePerFileState(...)`.
+- `model/AsyncUploadModels.kt` — `AsyncUploadResponse` / `UploadStatusResponse` / `PerFileStatus` Gson models.
+- `model/DeviceHealthResponse.kt` — `async_upload_available` capability field.
+- `api/DroneOpsSyncService.kt` — `uploadFlightsAsync(...)` + `pollUpload(...)`.
+- `api/ApiClient.kt` — split `uploadClient` (30 s) / `pollClient` (15 s) + `createPoll(...)`.
+- `viewmodel/MainViewModel.kt` — capability detection, `uploadFileAsync(...)` submit+poll loop, fallback to legacy path.
+- Tests: `UploadOutcomeTest`, `PollEnvelopeTest`.
+
+**Audit P2-2 is closed** by this PR plus DroneOpsCommand v2.71.0 (ADR-0023).

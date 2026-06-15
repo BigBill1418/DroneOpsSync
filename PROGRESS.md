@@ -2,40 +2,46 @@
 
 Session-by-session notes. Most recent first.
 
-## 2026-06-15 — Device-upload async poll client + per-file timeout isolation — DESIGNED (not started)
+## 2026-06-15 — Device-upload async poll client + per-file timeout isolation — SHIPPED (PR #57)
 
 Client half of the cross-repo device-upload async decoupling (audit P2-2 full
-leg). Analysis + docs only. Canonical contract is DroneOpsCommand ADR-0023;
-this repo's ADR-0008 records the client decisions.
+leg) — **implemented and committed** on branch `claude/device-upload-async`
+(PR #57). Both stages (per-file isolation + async adoption) landed together in
+one PR; releases on the next CI auto-bump at merge. **P2-2 is now closed**
+(DroneOpsCommand v2.71.0 server leg + this client leg). Canonical contract is
+DroneOpsCommand ADR-0023; this repo's ADR-0008 records the client decisions.
 
-- **Fast-follow (ship FIRST, backend-independent):** in
-  `viewmodel/MainViewModel.kt:721-725`, the `SocketTimeoutException` catch sets
-  `aborted = true`, and the loop guard at `:661-665` then marks every remaining
-  file `ERROR` without attempting it — one slow file loses the rest of the
-  sortie. Fix = drop the `aborted = true` line (per-file failure, not
-  batch-wide). `UnknownHostException` (`:720`) and HTTP 401/403 (`:690`) keep
-  `aborted` — those genuinely apply to the whole batch. One-line change, works
-  against today's synchronous server, big reliability payoff. Recommended as a
-  standalone APK release ahead of the async work.
-- **Async adoption (after backend Stage B is live):** add
-  `uploadFlightsAsync` (202 + `{batch_id}`) + `pollUpload(batchId)` to
-  `DroneOpsSyncService`; one batch_id per file (1:1 onto `UploadStatus`); poll
-  2 s → back off; capability-detect via `async_upload_available` on the
-  preflight (`DeviceHealthResponse`, forward-compat proven by
-  `KeyRotationParseTest`); fall back to the legacy route if absent.
-- **Timeout retune** (`ApiClient.kt:113-115`, currently 120 s read/write):
-  split to upload ~30 s + poll ~15 s — **only in the async-adopting release**,
-  never before (lowering it while the parse is still in-request amplifies the
-  hang).
-- **Release discipline:** do NOT manually bump the version in these PRs — CI
-  auto-bumps; a manual bump folds into the squash, HEAD reads `[skip ci]`, and
-  the "Bump patch version" workflow is suppressed (no release).
-- **Test plan:** extract the per-file outcome decision into a pure function and
-  cover it with a JVM unit test under
-  `android/app/src/test/java/com/droneopssync/app/` (the `KeyRotationParseTest`
-  style); poll-envelope Gson-contract tests for the async stage.
+- **Per-file socket-timeout isolation (Stage C) — DONE.** The inline per-file
+  outcome decision in `MainViewModel.performUpload` was extracted into the pure,
+  JVM-testable `classifyUploadOutcome(...)` in `upload/UploadOutcome.kt`. A
+  `SocketTimeoutException` now returns `abortBatch = false` — it fails only that
+  file and the batch continues. `UnknownHostException` (dead host) and HTTP
+  401/403 (bad device key) remain batch-wide aborts. Fixes the B2 bug where one
+  slow file lost files N+1…M. Tested by `UploadOutcomeTest` (10 cases).
+- **Async adoption (Stage D) — DONE.** `uploadFlightsAsync` (202 + `{batch_id}`)
+  + `pollUpload(batchId)` added to `DroneOpsSyncService`; one batch_id per file
+  (1:1 onto `UploadStatus`); `uploadFileAsync(...)` in `MainViewModel` does the
+  submit + poll loop (2 s, backing off to 5 s after 60 s, 10-min ceiling),
+  driving each file's status from `per_file[0].state` via `reducePerFileState`.
+  Capability detected via `async_upload_available` on the preflight
+  (`DeviceHealthResponse`); falls back to the legacy synchronous route when
+  absent/false. A 202 body that already marks the file `skipped` (SHA-256 dedup)
+  short-circuits with no poll. 202/poll Gson models in `model/AsyncUploadModels.kt`;
+  tested by `PollEnvelopeTest` (13 cases).
+- **Timeout retune — DONE.** `ApiClient` split into `uploadClient`
+  (readTimeout 30 s) + `pollClient` (readTimeout 15 s) via `createPoll(...)`;
+  `connectTimeout 20 s` and `writeTimeout 120 s` unchanged. Shipped in the same
+  release as the async route (correct — lowering it before the parse moved
+  off-request would have amplified the hang).
+- **Release discipline:** no manual version bump in this PR — CI auto-bumps on
+  merge; a manual bump folds into the squash, HEAD reads `[skip ci]`, and the
+  "Bump patch version" workflow is suppressed (no release).
 - **Plan:** DroneOpsCommand `docs/plans/2026-06-15-device-upload-async-decoupling.md`
-  (shared). **Owner:** fleet-mobile-engineer / aegis. Not started.
+  (shared). **Owner:** fleet-mobile-engineer / aegis.
+- **Operator end-to-end check (after release lands):** run a multi-file sortie
+  with one deliberately large record; confirm in Diagnostics → `[UPLOAD]` that a
+  slow file no longer blocks the others and the submit returns `HTTP 202` with a
+  `batch_id`.
 
 ## 2026-05-14 — SAF persisted-grant WRITE-flag fix (aegis; ADR-0006)
 
