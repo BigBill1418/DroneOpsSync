@@ -4,6 +4,20 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Added — async device-upload (202 + poll) + per-file socket-timeout isolation (ADR-0008; pairs with DroneOpsCommand ADR-0023 / v2.71.0)
+
+Closes the field-reliability half of the upload path. The legacy synchronous upload held the HTTP connection open for the **entire** server-side parse of each flight log (matching 120 s read-timeout on both ends); on field cellular/wifi a slow parse tripped the timeout — and, worse, a `SocketTimeoutException` on file *k* set `aborted = true`, which marked **every remaining file ERROR without attempting it**. One slow log nuked the rest of the sortie.
+
+Two fixes, one release:
+
+- **Per-file socket-timeout isolation (Stage C).** The inline per-file outcome logic in `MainViewModel.performUpload` is extracted into a pure, JVM-testable `classifyUploadOutcome(...)` (`upload/UploadOutcome.kt`). A `SocketTimeoutException` now fails **only that file** and the batch continues. `UnknownHostException` (dead host) and HTTP 401/403 (bad device key) remain correct batch-wide aborts. Tests: `UploadOutcomeTest` (10).
+- **Async upload adoption (Stage D).** When the server advertises `async_upload_available` on the `device-health` preflight, the client POSTs `…/device-upload/async`, gets a `202 + {batch_id}` (the connection is released after the byte-stream), and polls `…/device-upload/status/{batch_id}` (2 s, backing off to 5 s after 60 s, 10-min ceiling), driving each file's status from `per_file[0].state`. A `202` body that already marks the file `skipped` (SHA-256 dedup) short-circuits with no poll. The 202/poll Gson models live in `model/AsyncUploadModels.kt`; tests in `PollEnvelopeTest` (13).
+  - **Graceful fallback:** `async_upload_available` defaults false, so a new APK against an old/legacy server (or before the backend deploy) transparently uses the unchanged synchronous path. Client death mid-poll is safe — the job completes server-side and SHA-256 dedup reconciles on next launch.
+- **Timeout retune (only valid now the parse is off-request):** `ApiClient` splits into an upload client (`readTimeout 30 s`) and a poll client (`readTimeout 15 s`); `connectTimeout 20 s` unchanged. `writeTimeout` stays 120 s to bound a slow byte-upload on cellular.
+- No version bump in this PR (CI auto-bumps `android/version.properties` on merge — a manual bump folds into the squash, HEAD reads `[skip ci]`, and the release never fires).
+
+ADR: [`docs/adr/0008-device-upload-async-poll-client.md`](docs/adr/0008-device-upload-async-poll-client.md), cross-references DroneOpsCommand ADR-0023 (the canonical contract). Operator end-to-end check: run a multi-file sortie with one deliberately large record and confirm in Diagnostics that a slow file no longer blocks the others and the connection returns immediately with a 202.
+
 ### Fixed — SAF persisted grant must include WRITE for delete-on-controller (ADR-0006, amends ADR-0005)
 
 v1.3.27 (ADR-0005) shipped the SAF tree-picker as the RC Pro 2 scan path and promised post-upload `deleteSynced()` would remove the original on the controller via `DocumentsContract.deleteDocument(...)`. The picker took the persistable grant with `FLAG_GRANT_READ_URI_PERMISSION` only, no WRITE; the delete call therefore raised `SecurityException` once the process restarted and the in-memory grant was gone. The exception was swallowed by `runCatching{}.getOrDefault(false)`, so the user-facing toast read `"$deleted deleted, $failed could not be removed (may already be gone)"` — phrasing the operator (Bill, on the RC Pro 2) reasonably interpreted as "the system thinks it deleted them" while the files were still on the controller and got re-scanned as PENDING.

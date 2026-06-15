@@ -11,10 +11,24 @@ object ApiClient {
 
     private const val TAG = "ApiClient"
 
-    private val sharedClient: OkHttpClient by lazy { buildClient() }
+    // ADR-0023 / ADR-0008 timeout retune (this release only). Once the
+    // held-connection parse moved off-request (async route), the upload POST
+    // returns in byte-streaming time — seconds, not minutes — so the legacy
+    // 120 s readTimeout is no longer needed and only delays surfacing a real
+    // stall. We split into two clients:
+    //   • uploadClient — readTimeout 30 s. Serves the (async + legacy) upload
+    //     POSTs and the cheap preflight/health GETs.
+    //   • pollClient   — readTimeout 15 s. Serves the short status-poll GETs.
+    // connectTimeout stays 20 s on both (unchanged). Lowering the timeout was
+    // explicitly deferred to THIS release (ADR-0023 §2.5b) — doing it before
+    // the async leg would have amplified B1.
+    private val uploadClient: OkHttpClient by lazy { buildClient(readTimeoutSeconds = 30) }
+    private val pollClient: OkHttpClient by lazy { buildClient(readTimeoutSeconds = 15) }
 
     private var cachedBaseUrl: String? = null
     private var cachedService: DroneOpsSyncService? = null
+    private var cachedPollBaseUrl: String? = null
+    private var cachedPollService: DroneOpsSyncService? = null
 
     @Synchronized
     fun create(serverUrl: String): DroneOpsSyncService {
@@ -23,7 +37,7 @@ object ApiClient {
 
         val service = Retrofit.Builder()
             .baseUrl(base)
-            .client(sharedClient)
+            .client(uploadClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(DroneOpsSyncService::class.java)
@@ -33,10 +47,35 @@ object ApiClient {
         return service
     }
 
+    /**
+     * ADR-0023 / ADR-0008: a service bound to the short-readTimeout [pollClient]
+     * for the status-poll GETs. Same baseUrl normalization as [create]; only the
+     * underlying OkHttp readTimeout differs (15 s vs 30 s). Use [pollUpload] via
+     * this service; everything else uses [create].
+     */
+    @Synchronized
+    fun createPoll(serverUrl: String): DroneOpsSyncService {
+        val base = normalizeUrl(serverUrl)
+        cachedPollService?.let { if (cachedPollBaseUrl == base) return it }
+
+        val service = Retrofit.Builder()
+            .baseUrl(base)
+            .client(pollClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(DroneOpsSyncService::class.java)
+
+        cachedPollBaseUrl = base
+        cachedPollService = service
+        return service
+    }
+
     @Synchronized
     fun invalidate() {
         cachedBaseUrl = null
         cachedService = null
+        cachedPollBaseUrl = null
+        cachedPollService = null
     }
 
     /**
@@ -105,13 +144,13 @@ object ApiClient {
         return false
     }
 
-    private fun buildClient(): OkHttpClient {
+    private fun buildClient(readTimeoutSeconds: Long): OkHttpClient {
         val logging = HttpLoggingInterceptor { message -> Log.d(TAG, message) }
         logging.level = HttpLoggingInterceptor.Level.HEADERS
 
         return OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .addInterceptor(logging)

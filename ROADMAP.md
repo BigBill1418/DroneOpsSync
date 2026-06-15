@@ -1,5 +1,15 @@
 # DroneOpsSync Roadmap
 
+## Backlog — designed, not started
+
+**Device-upload async poll client (audit P2-2, designed 2026-06-15).** Two
+client releases: (1) a fast-follow that makes a `SocketTimeoutException`
+fail only the current file instead of aborting the whole sortie
+(`MainViewModel.kt:721-725`, one-line, backend-independent — recommended next);
+(2) adoption of the new server async upload route (202 + poll) once the backend
+ships it. See ADR-0008 + DroneOpsCommand ADR-0023 + shared plan
+`DroneOpsCommand/docs/plans/2026-06-15-device-upload-async-decoupling.md`.
+
 ## Current phase
 
 **v1.3.25 — zero-touch device API key rotation.** Scheduled via Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (fired 2026-04-24T18:58Z). Deliverable: PRs on both DroneOpsCommand + DroneOpsSync implementing grace-window dual-key auth + device-side preflight pickup. ADR will land as `docs/adr/0002-zero-touch-device-key-rotation.md` in this repo; corresponding server-side ADR-0003 lives in DroneOpsCommand.

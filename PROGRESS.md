@@ -2,6 +2,41 @@
 
 Session-by-session notes. Most recent first.
 
+## 2026-06-15 — Device-upload async poll client + per-file timeout isolation — DESIGNED (not started)
+
+Client half of the cross-repo device-upload async decoupling (audit P2-2 full
+leg). Analysis + docs only. Canonical contract is DroneOpsCommand ADR-0023;
+this repo's ADR-0008 records the client decisions.
+
+- **Fast-follow (ship FIRST, backend-independent):** in
+  `viewmodel/MainViewModel.kt:721-725`, the `SocketTimeoutException` catch sets
+  `aborted = true`, and the loop guard at `:661-665` then marks every remaining
+  file `ERROR` without attempting it — one slow file loses the rest of the
+  sortie. Fix = drop the `aborted = true` line (per-file failure, not
+  batch-wide). `UnknownHostException` (`:720`) and HTTP 401/403 (`:690`) keep
+  `aborted` — those genuinely apply to the whole batch. One-line change, works
+  against today's synchronous server, big reliability payoff. Recommended as a
+  standalone APK release ahead of the async work.
+- **Async adoption (after backend Stage B is live):** add
+  `uploadFlightsAsync` (202 + `{batch_id}`) + `pollUpload(batchId)` to
+  `DroneOpsSyncService`; one batch_id per file (1:1 onto `UploadStatus`); poll
+  2 s → back off; capability-detect via `async_upload_available` on the
+  preflight (`DeviceHealthResponse`, forward-compat proven by
+  `KeyRotationParseTest`); fall back to the legacy route if absent.
+- **Timeout retune** (`ApiClient.kt:113-115`, currently 120 s read/write):
+  split to upload ~30 s + poll ~15 s — **only in the async-adopting release**,
+  never before (lowering it while the parse is still in-request amplifies the
+  hang).
+- **Release discipline:** do NOT manually bump the version in these PRs — CI
+  auto-bumps; a manual bump folds into the squash, HEAD reads `[skip ci]`, and
+  the "Bump patch version" workflow is suppressed (no release).
+- **Test plan:** extract the per-file outcome decision into a pure function and
+  cover it with a JVM unit test under
+  `android/app/src/test/java/com/droneopssync/app/` (the `KeyRotationParseTest`
+  style); poll-envelope Gson-contract tests for the async stage.
+- **Plan:** DroneOpsCommand `docs/plans/2026-06-15-device-upload-async-decoupling.md`
+  (shared). **Owner:** fleet-mobile-engineer / aegis. Not started.
+
 ## 2026-05-14 — SAF persisted-grant WRITE-flag fix (aegis; ADR-0006)
 
 Branch `claude/saf-flight-log-rc-pro-2` (which carries ADR-0005 at `7f8e5d9`) gets a follow-up commit fixing the silent delete-on-controller failure surfaced by the operator on the DJI RC Pro 2.

@@ -29,6 +29,17 @@ data class DeviceHealthResponse(
     val uploadEndpoint: String? = null,
 
     /**
+     * ADR-0023 / ADR-0008 capability hint. `true` when the server exposes the
+     * async upload route pair (`…/device-upload/async` + `…/status/{batch_id}`).
+     * Null/absent on older backends — the client then falls back to the legacy
+     * synchronous [com.droneopssync.app.api.DroneOpsSyncService.uploadFlights]
+     * path so a new APK keeps working against an old server during rollout.
+     * This is a hint, not a gate — the route's existence is the real contract.
+     */
+    @SerializedName("async_upload_available")
+    val asyncUploadAvailable: Boolean? = null,
+
+    /**
      * The new raw API key, present ONLY when the device just authenticated
      * with the OLD key during a server-side rotation grace window. Null in
      * all steady-state cases.
