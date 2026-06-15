@@ -1,5 +1,31 @@
 # DroneOpsSync Roadmap
 
+## Device-upload async poll client (audit P2-2) — SHIPPED on `claude/device-upload-async` (PR #57), pending release
+
+**Objective:** close the field-reliability half of the upload path. Two stages
+shipped together: (1) per-file socket-timeout isolation — a `SocketTimeoutException`
+fails only the current file instead of aborting the whole sortie (the B2 bug);
+(2) adoption of the new server async upload route (202 + poll) with graceful
+fallback to the legacy synchronous path. Pairs with DroneOpsCommand v2.71.0.
+**Audit P2-2 is now closed** (server leg v2.71.0 + this client leg).
+
+Version intentionally not pinned here — CI auto-bumps `android/version.properties`
+on merge and publishes the release APK; the in-app version display reads it from
+`BuildConfig.VERSION_NAME`.
+
+**Success criteria:**
+- [x] `classifyUploadOutcome(...)` extracted to `upload/UploadOutcome.kt`; `SocketTimeoutException` no longer aborts the batch (`UploadOutcomeTest`, 10 cases)
+- [x] `uploadFlightsAsync` (202) + `pollUpload` added to `DroneOpsSyncService`; submit+poll loop in `MainViewModel.uploadFileAsync(...)`
+- [x] Capability detection via `async_upload_available` on the preflight; legacy fallback when absent/false
+- [x] 202/poll Gson models in `model/AsyncUploadModels.kt` (`PollEnvelopeTest`, 13 cases)
+- [x] `ApiClient` split into upload (30 s) / poll (15 s) clients
+- [x] ADR-0008 (client) + cross-ref to DroneOpsCommand ADR-0023 (contract)
+- [ ] APK ships post-merge via CI auto-bump (same keystore)
+- [ ] Operator end-to-end: multi-file sortie with one large record — slow file no longer blocks the rest; Diagnostics → `[UPLOAD]` shows `HTTP 202` + `batch_id`
+
+See ADR-0008 + DroneOpsCommand ADR-0023 + shared plan
+`DroneOpsCommand/docs/plans/2026-06-15-device-upload-async-decoupling.md`.
+
 ## Current phase
 
 **v1.3.25 — zero-touch device API key rotation.** Scheduled via Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (fired 2026-04-24T18:58Z). Deliverable: PRs on both DroneOpsCommand + DroneOpsSync implementing grace-window dual-key auth + device-side preflight pickup. ADR will land as `docs/adr/0002-zero-touch-device-key-rotation.md` in this repo; corresponding server-side ADR-0003 lives in DroneOpsCommand.

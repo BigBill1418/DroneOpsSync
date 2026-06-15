@@ -54,7 +54,8 @@ CI takes it from there: bump → build → publish release automatically.
 | Auto-flow on launch | `startAutoFlow()` — scan → wait for health check → upload → prompt delete |
 | Scan flight logs | `scanLogs()` / `performScan()` — `.txt .log .csv .json` from configured paths |
 | Pull-to-refresh | Drag down on log list → re-scan; driven by `isScanning` StateFlow |
-| Upload to server | `uploadAll()` / `performUpload()` — multipart POST, per-file status, abort on auth failure |
+| Upload to server | `uploadAll()` / `performUpload()` — multipart POST, per-file status. Per-file socket-timeout isolation (a slow file fails alone, not the batch); abort batch only on dead host (`UnknownHostException`) or bad key (401/403). Outcome logic is the pure `classifyUploadOutcome(...)` in `upload/UploadOutcome.kt` (ADR-0008) |
+| Async upload (202 + poll) | `uploadFileAsync(...)` — when the preflight advertises `async_upload_available`, POST `…/device-upload/async` → `202 + {batch_id}`, then poll `…/status/{batch_id}` (2 s → 5 s after 60 s, 10-min ceiling) until terminal; `reducePerFileState(...)` maps `per_file[0].state`. Falls back to synchronous `uploadFlights` when absent/false. Pairs with DroneOpsCommand v2.71.0 / ADR-0023 |
 | Per-file retry | Long-press **or** swipe right on any ERROR card → `retrySingle(log)` |
 | Haptic feedback | `HapticFeedbackType.LongPress` on both long-press and swipe-retry |
 | Delete confirmed files | `deleteSynced()` — SYNCED + DUPLICATE; auto-prompted after upload |
@@ -81,7 +82,7 @@ CI takes it from there: bump → build → publish release automatically.
 **Diag channels** (`DiagScreen` / Settings → Diagnostics)
 - `[SCAN]` — scan dispatch and per-file findings (source=SAF | source=Legacy)
 - `[NETWORK]` — health-check + upload-call lifecycle
-- `[UPLOAD]` — per-file upload status transitions
+- `[UPLOAD]` — per-file upload status transitions. On the async path also logs `async submit HTTP <code>`, `async accepted batch_id=…`, and per-poll `async poll status=… phase=… progress=…` (ADR-0008) — this is where an operator confirms the `202` end-to-end
 - `[PERM]` — SAF grant acquisition and the WRITE-flag canary on startup (`loadSettings`)
 - `[DELETE]` — `deleteSafDocument` outcomes; ERROR on `SecurityException` (WRITE missing or provider revoked) or other exception, WARN on `false`-return (provider acknowledged but refused — race with file-already-gone, etc.). Replaces the silent `runCatching{}.getOrDefault(false)` that hid the original ADR-0005 → ADR-0006 regression.
 - `[OTA]` — update-check and download lifecycle

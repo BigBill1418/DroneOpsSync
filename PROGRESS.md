@@ -2,6 +2,47 @@
 
 Session-by-session notes. Most recent first.
 
+## 2026-06-15 — Device-upload async poll client + per-file timeout isolation — SHIPPED (PR #57)
+
+Client half of the cross-repo device-upload async decoupling (audit P2-2 full
+leg) — **implemented and committed** on branch `claude/device-upload-async`
+(PR #57). Both stages (per-file isolation + async adoption) landed together in
+one PR; releases on the next CI auto-bump at merge. **P2-2 is now closed**
+(DroneOpsCommand v2.71.0 server leg + this client leg). Canonical contract is
+DroneOpsCommand ADR-0023; this repo's ADR-0008 records the client decisions.
+
+- **Per-file socket-timeout isolation (Stage C) — DONE.** The inline per-file
+  outcome decision in `MainViewModel.performUpload` was extracted into the pure,
+  JVM-testable `classifyUploadOutcome(...)` in `upload/UploadOutcome.kt`. A
+  `SocketTimeoutException` now returns `abortBatch = false` — it fails only that
+  file and the batch continues. `UnknownHostException` (dead host) and HTTP
+  401/403 (bad device key) remain batch-wide aborts. Fixes the B2 bug where one
+  slow file lost files N+1…M. Tested by `UploadOutcomeTest` (10 cases).
+- **Async adoption (Stage D) — DONE.** `uploadFlightsAsync` (202 + `{batch_id}`)
+  + `pollUpload(batchId)` added to `DroneOpsSyncService`; one batch_id per file
+  (1:1 onto `UploadStatus`); `uploadFileAsync(...)` in `MainViewModel` does the
+  submit + poll loop (2 s, backing off to 5 s after 60 s, 10-min ceiling),
+  driving each file's status from `per_file[0].state` via `reducePerFileState`.
+  Capability detected via `async_upload_available` on the preflight
+  (`DeviceHealthResponse`); falls back to the legacy synchronous route when
+  absent/false. A 202 body that already marks the file `skipped` (SHA-256 dedup)
+  short-circuits with no poll. 202/poll Gson models in `model/AsyncUploadModels.kt`;
+  tested by `PollEnvelopeTest` (13 cases).
+- **Timeout retune — DONE.** `ApiClient` split into `uploadClient`
+  (readTimeout 30 s) + `pollClient` (readTimeout 15 s) via `createPoll(...)`;
+  `connectTimeout 20 s` and `writeTimeout 120 s` unchanged. Shipped in the same
+  release as the async route (correct — lowering it before the parse moved
+  off-request would have amplified the hang).
+- **Release discipline:** no manual version bump in this PR — CI auto-bumps on
+  merge; a manual bump folds into the squash, HEAD reads `[skip ci]`, and the
+  "Bump patch version" workflow is suppressed (no release).
+- **Plan:** DroneOpsCommand `docs/plans/2026-06-15-device-upload-async-decoupling.md`
+  (shared). **Owner:** fleet-mobile-engineer / aegis.
+- **Operator end-to-end check (after release lands):** run a multi-file sortie
+  with one deliberately large record; confirm in Diagnostics → `[UPLOAD]` that a
+  slow file no longer blocks the others and the submit returns `HTTP 202` with a
+  `batch_id`.
+
 ## 2026-05-14 — SAF persisted-grant WRITE-flag fix (aegis; ADR-0006)
 
 Branch `claude/saf-flight-log-rc-pro-2` (which carries ADR-0005 at `7f8e5d9`) gets a follow-up commit fixing the silent delete-on-controller failure surfaced by the operator on the DJI RC Pro 2.

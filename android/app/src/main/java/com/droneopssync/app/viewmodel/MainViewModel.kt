@@ -15,9 +15,13 @@ import com.droneopssync.app.api.GitHubClient
 import com.droneopssync.app.model.DiagLevel
 import com.droneopssync.app.model.DiagLog
 import com.droneopssync.app.model.FlightLog
+import com.droneopssync.app.model.PerFileStatus
 import com.droneopssync.app.model.SyncRecord
 import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
+import com.droneopssync.app.upload.FileOutcome
+import com.droneopssync.app.upload.classifyUploadOutcome
+import com.droneopssync.app.upload.reducePerFileState
 import com.droneopssync.app.storage.FlightLogSource
 import com.droneopssync.app.storage.LegacyFileSource
 import com.droneopssync.app.storage.SafTreeSource
@@ -223,7 +227,10 @@ class MainViewModel : ViewModel() {
 
     // ── Preflight health gate (silent-drift watchdog layer 2, ADR-0001) ──────
     sealed class PreflightResult {
-        data object Ok : PreflightResult()
+        // ADR-0008/0023: carry the async-upload capability hint out of the
+        // preflight body so performUpload can pick the async vs legacy path.
+        // `false` (default) preserves the legacy behaviour for older backends.
+        data class Ok(val asyncUploadAvailable: Boolean = false) : PreflightResult()
         data class Fail(val code: String, val status: Int?, val message: String) : PreflightResult()
     }
 
@@ -242,8 +249,11 @@ class MainViewModel : ViewModel() {
             val response = ApiClient.create(url).deviceHealth(apiKey)
             when {
                 response.isSuccessful -> {
-                    maybeApplyRotatedKey(currentKey = apiKey, body = response.body())
-                    PreflightResult.Ok
+                    val body = response.body()
+                    maybeApplyRotatedKey(currentKey = apiKey, body = body)
+                    PreflightResult.Ok(
+                        asyncUploadAvailable = body?.asyncUploadAvailable == true
+                    )
                 }
                 response.code() == 401 -> PreflightResult.Fail(
                     "invalid_key",
@@ -296,6 +306,15 @@ class MainViewModel : ViewModel() {
     private companion object {
         const val ROTATED_KEY_PREFIX = "doc_"
         const val ROTATED_KEY_MIN_LENGTH = 40
+
+        // ── ADR-0008/0023 async poll cadence ─────────────────────────────────
+        // Poll every 2 s while non-terminal; back off to 5 s after 60 s; give
+        // up the FOREGROUND poll after a generous ceiling (the job completes
+        // server-side regardless — next launch reconciles via SHA-256 dedup).
+        const val POLL_INTERVAL_FAST_MS  = 2_000L
+        const val POLL_INTERVAL_SLOW_MS  = 5_000L
+        const val POLL_BACKOFF_AFTER_MS  = 60_000L
+        const val POLL_CEILING_MS        = 10 * 60_000L
     }
 
     private fun maybeApplyRotatedKey(
@@ -631,10 +650,12 @@ class MainViewModel : ViewModel() {
         // Block the upload if the server is unreachable or the key is bad.
         // Silent retries are exactly the class of failure that let the
         // 2026-04-23 RC Pro incident run for weeks unnoticed.
+        val asyncAvailable: Boolean
         when (val pre = preflightHealth(url, key)) {
             is PreflightResult.Ok -> {
                 _connectionError.value = null
                 _serverReachable.value = true
+                asyncAvailable = pre.asyncUploadAvailable
             }
             is PreflightResult.Fail -> {
                 _statusMessage.value = pre.message
@@ -648,7 +669,10 @@ class MainViewModel : ViewModel() {
         _isUploading.value = true
         pending.forEach { setStatus(it, UploadStatus.UPLOADING) }
 
-        diag(DiagLevel.INFO, "UPLOAD", "Starting upload: ${pending.size} file(s) → $url")
+        diag(
+            DiagLevel.INFO, "UPLOAD",
+            "Starting upload: ${pending.size} file(s) → $url  (path=${if (asyncAvailable) "async" else "legacy"})"
+        )
         pending.forEach { diag(DiagLevel.INFO, "UPLOAD", "  ${it.file.name}  (${it.sizeFormatted})") }
 
         var totalImported = 0
@@ -663,70 +687,31 @@ class MainViewModel : ViewModel() {
                     totalErrors++
                     continue
                 }
-                try {
-                    val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
-                    diag(DiagLevel.INFO, "UPLOAD", "${log.file.name} → \"$safeName\"  (${log.sizeFormatted})")
-                    val part = MultipartBody.Part.createFormData(
-                        "files", safeName,
-                        log.file.asRequestBody("text/plain".toMediaTypeOrNull())
-                    )
+                // ADR-0008/0023: per-file outcome. The async path returns a
+                // FileOutcome from the 202 + poll loop; the legacy path returns
+                // one from the synchronous uploadFlights call. Both are pure
+                // FileOutcomes the loop applies uniformly. GRACEFUL FALLBACK:
+                // `asyncAvailable` is false on older/legacy servers, so a new
+                // APK reaching a device before the backend deploy still works.
+                val outcome: FileOutcome = if (asyncAvailable) {
+                    uploadFileAsync(url, key, log)
+                } else {
+                    uploadFileLegacy(url, key, log)
+                }
 
-                    val response = ApiClient.create(url).uploadFlights(key, listOf(part))
-                    val body = response.body()
+                setStatus(log, outcome.newStatus)
+                totalImported += outcome.importedDelta
+                if (outcome.newStatus == UploadStatus.DUPLICATE) totalSkipped += outcome.skippedDelta
+                if (outcome.newStatus == UploadStatus.ERROR) totalErrors++
+                if (outcome.abortBatch) aborted = true
 
-                    diag(DiagLevel.INFO, "UPLOAD", "  HTTP ${response.code()}")
-                    if (body != null) {
-                        diag(DiagLevel.INFO, "UPLOAD", "  imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
-                        body.errors.forEachIndexed { i, err -> diag(DiagLevel.ERROR, "UPLOAD", "  error[$i]: $err") }
-                    } else {
-                        val rawErr = response.errorBody()?.string()?.take(500) ?: "(no body)"
-                        diag(DiagLevel.ERROR, "UPLOAD", "  body null — raw: $rawErr")
-                    }
-
-                    when {
-                        !response.isSuccessful -> {
-                            setStatus(log, UploadStatus.ERROR)
-                            totalErrors++
-                            if (response.code() in listOf(401, 403)) aborted = true
-                        }
-                        body == null -> {
-                            setStatus(log, UploadStatus.ERROR)
-                            totalErrors++
-                        }
-                        body.errors.isNotEmpty() -> {
-                            setStatus(log, UploadStatus.ERROR)
-                            totalErrors++
-                        }
-                        body.skipped > 0 -> {
-                            setStatus(log, UploadStatus.DUPLICATE)
-                            totalSkipped++
-                            // ADR-0005: SAF cache copy is no longer needed
-                            // — server has the bytes. Delete the staging
-                            // file to keep cacheDir bounded. The
-                            // controller-side artifact stays put until
-                            // the operator confirms the delete dialog.
-                            cleanupSafCacheFile(log)
-                        }
-                        else -> {
-                            setStatus(log, UploadStatus.SYNCED)
-                            totalImported += body.imported
-                            cleanupSafCacheFile(log)
-                        }
-                    }
-                } catch (e: UnknownHostException) {
-                    setStatus(log, UploadStatus.ERROR)
-                    totalErrors++
-                    diag(DiagLevel.ERROR, "UPLOAD", "UnknownHostException: ${e.message}")
-                    aborted = true
-                } catch (e: SocketTimeoutException) {
-                    setStatus(log, UploadStatus.ERROR)
-                    totalErrors++
-                    diag(DiagLevel.ERROR, "UPLOAD", "SocketTimeoutException: ${e.message}")
-                    aborted = true
-                } catch (e: Exception) {
-                    setStatus(log, UploadStatus.ERROR)
-                    totalErrors++
-                    diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
+                // ADR-0005: on a terminal success, the SAF cache copy is no
+                // longer needed — server has the bytes. Tear the staging file
+                // down to keep cacheDir bounded. The controller-side artifact
+                // stays put until the operator confirms the delete dialog.
+                if (outcome.newStatus == UploadStatus.SYNCED ||
+                    outcome.newStatus == UploadStatus.DUPLICATE) {
+                    cleanupSafCacheFile(log)
                 }
             }
         } finally {
@@ -764,6 +749,181 @@ class MainViewModel : ViewModel() {
             it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE
         }
     }
+
+    /**
+     * Build the multipart part for a single file, sanitizing the filename the
+     * same way the legacy path always has (strip bracket/brace chars).
+     */
+    private fun buildPart(log: FlightLog): MultipartBody.Part {
+        val safeName = log.file.name.replace(Regex("[\\[\\](){}]"), "_")
+        diag(DiagLevel.INFO, "UPLOAD", "${log.file.name} → \"$safeName\"  (${log.sizeFormatted})")
+        return MultipartBody.Part.createFormData(
+            "files", safeName,
+            log.file.asRequestBody("text/plain".toMediaTypeOrNull())
+        )
+    }
+
+    /**
+     * Legacy synchronous upload of one file (Stage C behaviour). One POST to
+     * the unchanged `…/device-upload` route; the parse happens in-request on
+     * the server. The per-file outcome decision is delegated to the pure
+     * [classifyUploadOutcome] (Stage C fix: a socket timeout fails this file
+     * alone and never aborts the batch).
+     */
+    private suspend fun uploadFileLegacy(url: String, key: String, log: FlightLog): FileOutcome {
+        return try {
+            val response = ApiClient.create(url).uploadFlights(key, listOf(buildPart(log)))
+            val body = response.body()
+
+            diag(DiagLevel.INFO, "UPLOAD", "  HTTP ${response.code()}")
+            if (body != null) {
+                diag(DiagLevel.INFO, "UPLOAD", "  imported=${body.imported}  skipped=${body.skipped}  errors=${body.errors.size}")
+                body.errors.forEachIndexed { i, err -> diag(DiagLevel.ERROR, "UPLOAD", "  error[$i]: $err") }
+            } else {
+                val rawErr = response.errorBody()?.string()?.take(500) ?: "(no body)"
+                diag(DiagLevel.ERROR, "UPLOAD", "  body null — raw: $rawErr")
+            }
+
+            classifyUploadOutcome(
+                isSuccessful = response.isSuccessful,
+                httpCode = response.code(),
+                body = body,
+                throwable = null,
+            )
+        } catch (e: Exception) {
+            diag(DiagLevel.ERROR, "UPLOAD", "${e.javaClass.simpleName}: ${e.message}")
+            classifyUploadOutcome(
+                isSuccessful = false,
+                httpCode = null,
+                body = null,
+                throwable = e,
+            )
+        }
+    }
+
+    /**
+     * ADR-0008/0023 async upload of one file. POST to `…/device-upload/async`,
+     * get a 202 + `batch_id`, then poll `…/status/{batch_id}` (2 s cadence,
+     * back off to 5 s after 60 s, soft ceiling) and drive the per-file
+     * UploadStatus from `per_file[0].state` until terminal.
+     *
+     * The connection is held only for the byte-stream, not the parse (B1
+     * eliminated). A slow/failed parse on one file never affects another (B2
+     * eliminated): each file is its own batch_id, and a poll exception or
+     * ceiling is a per-file ERROR that never aborts the batch — EXCEPT a 401/403
+     * on submit (bad device key) and an UnknownHost on submit (dead host),
+     * which are genuinely batch-wide and reuse [classifyUploadOutcome].
+     *
+     * Client death mid-poll is safe: the job completes server-side regardless;
+     * SHA-256 dedup reconciles on next launch.
+     */
+    private suspend fun uploadFileAsync(url: String, key: String, log: FlightLog): FileOutcome {
+        // ── Submit ───────────────────────────────────────────────────────────
+        val batchId: String = try {
+            val response = ApiClient.create(url).uploadFlightsAsync(key, listOf(buildPart(log)))
+            diag(DiagLevel.INFO, "UPLOAD", "  async submit HTTP ${response.code()}")
+
+            if (!response.isSuccessful) {
+                val rawErr = response.errorBody()?.string()?.take(500) ?: "(no body)"
+                diag(DiagLevel.ERROR, "UPLOAD", "  async submit failed — raw: $rawErr")
+                // Bad key (401/403) is batch-wide; other non-2xx fail this file.
+                return classifyUploadOutcome(
+                    isSuccessful = false,
+                    httpCode = response.code(),
+                    body = null,
+                    throwable = null,
+                )
+            }
+
+            val acceptBody = response.body()
+            if (acceptBody == null || acceptBody.batchId.isBlank()) {
+                diag(DiagLevel.ERROR, "UPLOAD", "  async submit 2xx but no batch_id — treating as error")
+                return FileOutcome(UploadStatus.ERROR, abortBatch = false)
+            }
+
+            // Pre-parse dedup short-circuit: server may already mark the single
+            // submitted file `skipped` in the 202 body (no job, no poll needed).
+            val submitState = acceptBody.files.firstOrNull()?.state
+            reducePerFileState(submitState)?.let { terminal ->
+                diag(DiagLevel.INFO, "UPLOAD", "  async submit short-circuit: state=$submitState")
+                return terminalOutcome(terminal)
+            }
+
+            diag(DiagLevel.INFO, "UPLOAD", "  async accepted batch_id=${acceptBody.batchId}")
+            acceptBody.batchId
+        } catch (e: Exception) {
+            // UnknownHost → batch-wide abort; SocketTimeout/other → this file only.
+            diag(DiagLevel.ERROR, "UPLOAD", "  async submit ${e.javaClass.simpleName}: ${e.message}")
+            return classifyUploadOutcome(
+                isSuccessful = false,
+                httpCode = null,
+                body = null,
+                throwable = e,
+            )
+        }
+
+        // ── Poll ─────────────────────────────────────────────────────────────
+        val pollService = ApiClient.createPoll(url)
+        val started = System.currentTimeMillis()
+        while (true) {
+            val elapsed = System.currentTimeMillis() - started
+            if (elapsed > POLL_CEILING_MS) {
+                diag(
+                    DiagLevel.WARN, "UPLOAD",
+                    "  async poll ceiling reached for batch=$batchId — job continues server-side; dedup reconciles on next launch"
+                )
+                return FileOutcome(UploadStatus.ERROR, abortBatch = false)
+            }
+            val interval = if (elapsed >= POLL_BACKOFF_AFTER_MS) POLL_INTERVAL_SLOW_MS else POLL_INTERVAL_FAST_MS
+            kotlinx.coroutines.delay(interval)
+
+            val perFile: PerFileStatus? = try {
+                val response = pollService.pollUpload(key, batchId)
+                if (!response.isSuccessful) {
+                    diag(DiagLevel.WARN, "UPLOAD", "  async poll HTTP ${response.code()} — retrying")
+                    continue
+                }
+                val statusBody = response.body()
+                diag(
+                    DiagLevel.INFO, "UPLOAD",
+                    "  async poll status=${statusBody?.status} phase=${statusBody?.phase} progress=${statusBody?.progress}"
+                )
+                statusBody?.perFile?.firstOrNull()
+            } catch (e: Exception) {
+                // Transient poll failure — the job is still running server-side;
+                // keep polling until the ceiling. Never abort the batch on a poll.
+                diag(DiagLevel.WARN, "UPLOAD", "  async poll ${e.javaClass.simpleName}: ${e.message} — retrying")
+                continue
+            }
+
+            val terminal = reducePerFileState(perFile?.state)
+            if (terminal != null) {
+                perFile?.error?.let { diag(DiagLevel.ERROR, "UPLOAD", "  async per-file error: $it") }
+                diag(DiagLevel.INFO, "UPLOAD", "  async terminal: ${perFile?.state} → $terminal")
+                return terminalOutcome(terminal, perFile)
+            }
+        }
+    }
+
+    /**
+     * Map a terminal [UploadStatus] (from the async reducer) to a [FileOutcome]
+     * carrying the right counter deltas. Never aborts the batch — a per-file
+     * terminal state is by definition file-scoped.
+     */
+    private fun terminalOutcome(status: UploadStatus, perFile: PerFileStatus? = null): FileOutcome =
+        when (status) {
+            UploadStatus.SYNCED -> FileOutcome(
+                UploadStatus.SYNCED,
+                abortBatch = false,
+                importedDelta = perFile?.imported ?: 1,
+            )
+            UploadStatus.DUPLICATE -> FileOutcome(
+                UploadStatus.DUPLICATE,
+                abortBatch = false,
+                skippedDelta = 1,
+            )
+            else -> FileOutcome(UploadStatus.ERROR, abortBatch = false)
+        }
 
     // ── Auto-flow: scan → sync → prompt delete ────────────────────────────────
 

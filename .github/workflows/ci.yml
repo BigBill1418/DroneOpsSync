@@ -1,0 +1,60 @@
+name: CI — unit tests
+
+# Test gate for pull requests and feature branches.
+#
+# Runs the JVM unit tests (testDebugUnitTest) so the suite bootstrapped in
+# PR #57 actually executes in CI going forward. release.yml only runs
+# assembleRelease, which compiles but never runs the tests.
+#
+# Deliberately NOT triggered on `main` pushes: that path belongs to
+# version-bump.yml → release.yml. Gating PRs (base main) + claude/** feature
+# branches catches regressions before merge without duplicating the release run.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - 'claude/**'
+
+permissions:
+  contents: read
+
+# Cancel an in-flight run when a new commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    # Same BOS-HQ self-hosted runner pool release.yml uses (ADR-0029). The
+    # runner is ephemeral and provisions JDK + Android SDK per-run, so the
+    # setup steps below mirror the proven release.yml environment exactly.
+    runs-on: [self-hosted, linux, x64, bos]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-33 build-tools;33.0.2'
+
+      - name: Run unit tests
+        run: |
+          cd android
+          chmod +x gradlew
+          bash gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
