@@ -40,9 +40,18 @@ data class FlightLog(
         return if (kb < 1024) "%.1f KB".format(kb) else "%.1f MB".format(kb / 1024.0)
     }
 
+    /**
+     * Flight date for display (ADR-0010). Derived from the DJI/Litchi/Airdata
+     * FILENAME when possible (the authoritative flight datetime); falls back to
+     * file mtime only when that mtime is a plausible timestamp. A zeroed SAF
+     * cache-copy mtime (`Date(0)` → "31 Dec 1969") never renders — it shows
+     * "Unknown date" instead. See [resolveFlightDisplayMillis].
+     */
     val dateFormatted: String get() {
+        val millis = resolveFlightDisplayMillis(name, file.lastModified(), System.currentTimeMillis())
+            ?: return "Unknown date"
         val sdf = SimpleDateFormat("dd MMM yyyy  HH:mm", Locale.getDefault())
-        return sdf.format(Date(file.lastModified()))
+        return sdf.format(Date(millis))
     }
 }
 
