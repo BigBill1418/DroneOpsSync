@@ -4,6 +4,23 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Fixed — 2026-07-02 — P0 data-loss: truncated SAF transfer could be marked SYNCED then auto-deleted (transfer-integrity guard; ADR number TBD)
+
+**Severity: critical, silent, irreversible.** The SAF scan path copies each flight log off the DJI controller into `cacheDir/saf-staging` with `input.copyTo(output)` (`storage/FlightLogSource.kt`). `InputStream.copyTo` returns **normally** on a short/interrupted content-provider read — so a partial read produced a *truncated* cache file with no error. The copy path had the source length (`child.length()`) in hand but used it only for mtime, never compared it. The upload path (`MainViewModel.buildPart`/`uploadFileLegacy`) then sent whatever bytes were in the cache file with no client-side length/checksum assertion. A truncated log that still parsed server-side came back `imported` → `SYNCED` (`upload/UploadOutcome.kt`), which made the file eligible for `deleteSynced()` → `deleteSafDocument()` — **deleting the only copy of irreplaceable field data on the controller.**
+
+Client-side, minimum-viable, fail-safe fix (no server change, no god-ViewModel refactor):
+
+- **New pure module `storage/TransferIntegrity.kt`** (JVM-testable, no Android runtime — same seam pattern as `upload/UploadOutcome.kt`):
+  - `isTransferVerified(sourceLen, copiedLen)` — true only when source length is known (`> 0`) and the copy matches it exactly.
+  - `isTruncatedCopy(sourceLen, copiedLen)` — true only on a *known*, mismatched length (an unknown length is unverifiable, not a truncation signal — discarding on it would break upload for providers that hide length).
+  - `isDeleteEligible(status, verifiedTransfer)` — a file's controller original may be auto-deleted only when SYNCED/DUPLICATE **and** its transfer was verified.
+- **`storage/FlightLogSource.kt` (`SafTreeSource.scan`)** — capture `child.length()` as `expectedLen` before the copy; after the copy, if `isTruncatedCopy(expectedLen, copiedLen)` the partial cache file is discarded and the file is skipped this scan (staging is wiped and the whole file re-copied next scan — fail/retry, never proceed with a partial log). Otherwise the `FlightLog` carries `verifiedTransfer = isTransferVerified(...)`.
+- **`model/FlightLog.kt`** — new field `verifiedTransfer: Boolean = true`. Legacy entries are the on-disk original (no copy) so the default keeps their behaviour unchanged; SAF entries set it explicitly.
+- **`MainViewModel.deleteSynced()`** — delete set now filtered through `isDeleteEligible(...)`; a `[DELETE]` WARN is emitted for any SYNCED/DUPLICATE file held back as unverified. Defense-in-depth: even if a future path admits an unverified file, it can never reach the destructive delete.
+- **Tests:** `TransferIntegrityTest` (17 assertions) covering exact match, short read, over-read, unknown length (0/-1), and the SYNCED-but-unverified delete-guard. **Note:** the full Android `./gradlew test` suite could NOT be executed in the fix environment (no Android SDK / no JDK on host, offline). The pure logic in `TransferIntegrity.kt` WAS compiled and executed against the embedded Kotlin compiler in a JDK17 container (17/17 assertions PASS); the Android-dependent edits were verified by inspection. CI / a machine with the toolchain must run the JVM suite.
+
+ADR: to be written under `docs/adr/` (transfer-integrity guard; next free number is 0009 — assign on merge). Operator end-to-end check: interrupt a SAF scan/copy mid-file and confirm the file is NOT marked SYNCED and its controller original is NOT offered for delete.
+
 ### Added — async device-upload (202 + poll) + per-file socket-timeout isolation (ADR-0008; pairs with DroneOpsCommand ADR-0023 / v2.71.0)
 
 Closes the field-reliability half of the upload path. The legacy synchronous upload held the HTTP connection open for the **entire** server-side parse of each flight log (matching 120 s read-timeout on both ends); on field cellular/wifi a slow parse tripped the timeout — and, worse, a `SocketTimeoutException` on file *k* set `aborted = true`, which marked **every remaining file ERROR without attempting it**. One slow log nuked the rest of the sortie.

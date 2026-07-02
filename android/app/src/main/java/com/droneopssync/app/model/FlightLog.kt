@@ -16,11 +16,20 @@ import java.util.Locale
  *                   controller" can call `DocumentsContract.deleteDocument`
  *                   on the right artifact instead of silently deleting only
  *                   our cache copy.
+ * @param verifiedTransfer  Transfer-integrity guard: whether the bytes backing `file` are
+ *                   trusted to be complete. Legacy entries are the original
+ *                   on-disk file (no copy occurred) → `true`. SAF entries are
+ *                   a staging copy: `true` only when the copied byte count
+ *                   exactly matched the source document length. An unverified
+ *                   SAF copy is still uploadable but is NEVER eligible for the
+ *                   destructive delete-from-controller flow — see
+ *                   `storage/TransferIntegrity.kt::isDeleteEligible`.
  */
 data class FlightLog(
     val file: File,
     val uploadStatus: UploadStatus = UploadStatus.PENDING,
     val sourceUri: Uri? = null,
+    val verifiedTransfer: Boolean = true,
 ) {
     val name: String get() = file.name
     val sizeBytes: Long get() = file.length()

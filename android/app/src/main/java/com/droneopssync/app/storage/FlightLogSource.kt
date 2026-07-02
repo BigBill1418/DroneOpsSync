@@ -155,10 +155,29 @@ class SafTreeSource(
                     diag += "  $rawName — openInputStream returned null"
                     continue
                 }
+                // Capture the source document's reported length BEFORE the
+                // copy so we can verify against it afterwards. `copyTo` returns
+                // normally on a short/interrupted content-provider read, so the
+                // landed byte count is the only client-side truncation signal.
+                val expectedLen = child.length()
                 stream.use { input ->
                     FileOutputStream(cacheFile).use { output ->
                         input.copyTo(output)
                     }
+                }
+                val copiedLen = cacheFile.length()
+                // Transfer-integrity guard (data-loss): a truncated copy that still parses
+                // server-side would flip SYNCED and become delete-eligible,
+                // erasing the only good copy on the controller. Discard the
+                // partial file and skip it this scan — staging is wiped and the
+                // whole file re-copied on the next scan (fail/retry, never
+                // proceed with a partial log).
+                if (isTruncatedCopy(expectedLen, copiedLen)) {
+                    Log.e(SCAN_TAG, "SAF copy TRUNCATED for $rawName: $copiedLen/$expectedLen B — discarded")
+                    diag += "  $rawName — TRUNCATED copy $copiedLen/$expectedLen B — discarded (will retry next scan)"
+                    cacheFile.delete()
+                    skipped++
+                    continue
                 }
                 // Preserve mtime so the existing ordering (newest first)
                 // and date-formatted display match what the operator
@@ -168,10 +187,14 @@ class SafTreeSource(
                 // sourceUri carries the original DJI-side document URI so
                 // a subsequent "delete from controller" can target the
                 // real artifact via DocumentsContract instead of silently
-                // deleting only our cache copy.
-                found.add(FlightLog(file = cacheFile, sourceUri = child.uri))
+                // deleting only our cache copy. verifiedTransfer gates that
+                // destructive delete: true only on an exact known-length match;
+                // an unknown source length (provider reported 0/-1) is uploadable
+                // but never auto-deletable.
+                val verified = isTransferVerified(expectedLen, copiedLen)
+                found.add(FlightLog(file = cacheFile, sourceUri = child.uri, verifiedTransfer = verified))
                 copied++
-                diag += "  ${rawName}  (${cacheFile.length()} B)  → cache"
+                diag += "  ${rawName}  ($copiedLen B)  → cache  verified=$verified"
             } catch (e: IOException) {
                 Log.e(SCAN_TAG, "SAF copy failed for $rawName", e)
                 diag += "  $rawName — IOException: ${e.message?.take(120)}"
