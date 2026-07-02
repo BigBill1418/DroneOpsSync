@@ -25,6 +25,7 @@ import com.droneopssync.app.upload.reducePerFileState
 import com.droneopssync.app.storage.FlightLogSource
 import com.droneopssync.app.storage.LegacyFileSource
 import com.droneopssync.app.storage.SafTreeSource
+import com.droneopssync.app.storage.isDeleteEligible
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -1027,8 +1028,20 @@ class MainViewModel : ViewModel() {
 
     fun deleteSynced() {
         viewModelScope.launch(Dispatchers.IO) {
-            val toDelete = _logs.value.filter {
-                it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE
+            // Transfer-integrity guard (data-loss): only delete the controller original for
+            // files whose transfer was VERIFIED complete. A SYNCED row off an
+            // unverified/truncated SAF copy must never trigger the destructive
+            // delete — that would erase the only good copy of irreplaceable
+            // field data. Legacy entries are the on-disk original (verifiedTransfer
+            // defaults true), so their delete behaviour is unchanged.
+            val eligible = _logs.value.filter { it.uploadStatus == UploadStatus.SYNCED || it.uploadStatus == UploadStatus.DUPLICATE }
+            val toDelete = eligible.filter { isDeleteEligible(it.uploadStatus, it.verifiedTransfer) }
+            val protectedCount = eligible.size - toDelete.size
+            if (protectedCount > 0) {
+                diag(
+                    DiagLevel.WARN, "DELETE",
+                    "$protectedCount synced file(s) held back — transfer unverified (possible truncated copy); controller original preserved"
+                )
             }
             var deleted = 0
             var failed = 0
