@@ -92,3 +92,21 @@ fun resolveFlightDisplayMillis(name: String, mtimeMillis: Long, nowMillis: Long)
     if (isPlausibleTimestamp(mtimeMillis, nowMillis)) return mtimeMillis
     return null
 }
+
+/**
+ * Total, non-null ordering key for the flight-log LIST (ADR-0010, sort half).
+ *
+ * The list used to sort by `file.lastModified()`, but a SAF cache copy whose
+ * DJI controller reports `lastModified() == 0` now DISPLAYS the correct flight
+ * date (via [resolveFlightDisplayMillis]) yet sorted to the very bottom — the
+ * "log timing" anomaly: displayed order didn't match displayed dates.
+ *
+ * The sort key is the SAME instant the row renders — [resolveFlightDisplayMillis]
+ * — so `sortedByDescending { flightSortKey(...) }` yields newest-flight-first in
+ * lockstep with the visible dates. When display resolves to `null` (no parseable
+ * filename date AND an implausible mtime, i.e. an "Unknown date" row) the key
+ * falls back to the raw mtime so ordering stays total and deterministic instead
+ * of throwing on a null key; such rows sink together at the bottom.
+ */
+fun flightSortKey(name: String, mtimeMillis: Long, nowMillis: Long): Long =
+    resolveFlightDisplayMillis(name, mtimeMillis, nowMillis) ?: mtimeMillis
