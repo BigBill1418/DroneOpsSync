@@ -65,11 +65,9 @@ fix requirement #3 — no change was needed there.
   now shows its filename datetime; the `dd MMM yyyy` portion is the same day as
   the old mtime display (DJI writes the record on landing), while the `HH:mm`
   shifts from write-time to the more authoritative flight-start time in the name.
-- **List ordering is unchanged.** `MainViewModel.performScan` still sorts by
-  `file.lastModified()`. A SAF copy with a zeroed mtime therefore still sorts
-  last even though its date now displays correctly. Re-keying the sort on the
-  derived date is a deliberate follow-up (it changes observable ordering and is
-  outside this display-only, non-breaking fix).
+- **List ordering** was left keyed on `file.lastModified()` by the display-only
+  fix, so a SAF copy with a zeroed mtime still sorted last even though its date
+  displayed correctly. Resolved in the 2026-07-03 addendum below.
 - Only length-of-name date signals are used; a controller with a mis-set clock
   that also writes a wrong date into the filename would still display that wrong
   (but plausible) date — no client-side truth source beyond the filename exists.
@@ -77,3 +75,35 @@ fix requirement #3 — no change was needed there.
   the pure logic in `FlightDate.kt` was compiled and executed against a Kotlin
   compiler (20/20 assertions PASS, across 4 time zones). The instrumented JVM
   suite (`FlightDateTest`, 20 assertions) must pass in CI on a real toolchain.
+
+## Addendum — 2026-07-03: the sort half (list order follows the displayed date)
+
+The original fix corrected the **displayed** date but left the **list order**
+keyed on `file.lastModified()`. This split the two: a SAF copy whose controller
+reports `lastModified() == 0` now showed its real filename date but sorted to the
+bottom of the list — the operator-reported "log timing" anomaly (display said one
+order, the list showed another).
+
+Fix: sort on the same instant the row displays.
+
+- **`FlightDate.kt::flightSortKey(name, mtime, now)`** — a total, non-null `Long`
+  key: `resolveFlightDisplayMillis(name, mtime, now) ?: mtime`. It reuses the
+  display resolver so the sort key and the rendered date are the same value by
+  construction; the `?: mtime` fall-back keeps ordering total and deterministic
+  for "Unknown date" rows (where the resolver returns `null`) rather than
+  crashing on a null key. Those rows sort together at the bottom.
+- **`MainViewModel.performScan`** — `sortedByDescending { it.file.lastModified() }`
+  → `sortedByDescending { flightSortKey(it.name, it.file.lastModified(), now) }`,
+  with `now` captured once per scan. One-line key swap; the god-ViewModel is not
+  otherwise touched.
+
+Consequence: the list orders newest-flight-first in lockstep with the visible
+dates, regardless of a zeroed mtime. A legacy file with no filename date and a
+valid mtime is unaffected (its key is still that mtime).
+
+Verification: `FlightDate.kt` + the full real `FlightDateTest.kt` (now 20 tests:
+16 display-half + 4 sort-half) compiled with `kotlinc` and executed under
+`org.junit.runner.JUnitCore` (JUnit 4.13.2) in a container — **OK (20 tests)**.
+The lone Android-runtime edit (`MainViewModel.performScan`) can't unit-run
+without the Android SDK; the "CI — unit tests" workflow (`testDebugUnitTest`)
+compiles the ViewModel and runs the JVM suite on the real toolchain.

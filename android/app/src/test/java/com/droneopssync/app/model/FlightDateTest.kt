@@ -142,4 +142,56 @@ class FlightDateTest {
         val millis = resolveFlightDisplayMillis("Flight-2005-01-01.csv", validMtime, now)!!
         assertEquals(fmt(validMtime), fmt(millis))
     }
+
+    // ── flightSortKey: the list-order half (ADR-0010, sort) ─────────────────────
+
+    @Test
+    fun `sort key of a zero-mtime SAF copy is its filename date, not zero`() {
+        // The anomaly: display was fixed, but the key was still 0 → sank to bottom.
+        val key = flightSortKey("DJIFlightRecord_2026-06-30_[12-34-56].txt", 0L, now)
+        assertEquals("2026-06-30 12:34", fmt(key))
+    }
+
+    @Test
+    fun `sort key falls back to raw mtime when no date is resolvable`() {
+        // Unknown-date row (no filename date, zero mtime): key is the raw mtime so
+        // ordering stays total and deterministic instead of a null-key crash.
+        assertEquals(0L, flightSortKey("randomlog.txt", 0L, now))
+        assertEquals(-5L, flightSortKey("randomlog.txt", -5L, now))
+    }
+
+    @Test
+    fun `list sorts by derived flight date, NOT by mtime, even with a zero-mtime SAF copy`() {
+        // The canonical regression this fix closes. Three logs:
+        //   - newest flight (2026-06-30) is a SAF copy with mtime == 0
+        //   - middle flight (2026-06-15) has a plausible mtime
+        //   - oldest flight (2026-05-01) also plausible mtime
+        // Sorting by mtime would sink the zero-mtime newest flight to the bottom.
+        // Sorting by flightSortKey must yield newest-flight-first.
+        data class Row(val name: String, val mtime: Long)
+        val newestSaf = Row("DJIFlightRecord_2026-06-30_[08-00-00].txt", 0L)            // mtime 0
+        val middle    = Row("DJIFlightRecord_2026-06-15_[08-00-00].txt", now - 100_000L)
+        val oldest    = Row("DJIFlightRecord_2026-05-01_[08-00-00].txt", now - 200_000L)
+
+        // Feed them in a deliberately wrong order to prove the sort does the work.
+        val sorted = listOf(middle, oldest, newestSaf)
+            .sortedByDescending { flightSortKey(it.name, it.mtime, now) }
+
+        assertEquals(listOf(newestSaf, middle, oldest), sorted)
+
+        // Sanity: a naive mtime sort would NOT produce this order (newestSaf last).
+        val byMtime = listOf(middle, oldest, newestSaf).sortedByDescending { it.mtime }
+        assertEquals(newestSaf, byMtime.last())
+    }
+
+    @Test
+    fun `unknown-date rows sink below dated flights`() {
+        data class Row(val name: String, val mtime: Long)
+        val dated   = Row("DJIFlightRecord_2026-06-30_[08-00-00].txt", 0L)
+        val unknown = Row("randomlog.txt", 0L) // no filename date, zero mtime → key 0
+
+        val sorted = listOf(unknown, dated)
+            .sortedByDescending { flightSortKey(it.name, it.mtime, now) }
+        assertEquals(listOf(dated, unknown), sorted)
+    }
 }

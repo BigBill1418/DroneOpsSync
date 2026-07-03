@@ -19,6 +19,7 @@ import com.droneopssync.app.model.PerFileStatus
 import com.droneopssync.app.model.SyncRecord
 import com.droneopssync.app.model.UpdateState
 import com.droneopssync.app.model.UploadStatus
+import com.droneopssync.app.model.flightSortKey
 import com.droneopssync.app.upload.FileOutcome
 import com.droneopssync.app.upload.classifyUploadOutcome
 import com.droneopssync.app.upload.reducePerFileState
@@ -587,7 +588,12 @@ class MainViewModel : ViewModel() {
         result.perPathDiag.forEach { diag(DiagLevel.INFO, "SCAN", "  $it") }
         result.missingPaths.forEach { diag(DiagLevel.WARN, "SCAN", "Missing: $it") }
 
-        var found = result.logs.sortedByDescending { it.file.lastModified() }
+        // ADR-0010 (sort half): order by the SAME derived flight instant the row
+        // DISPLAYS — not raw mtime — so a zero-mtime SAF copy that now shows its
+        // real filename date also SORTS in the right place (newest flight first).
+        // Falls back to mtime for "Unknown date" rows so ordering stays total.
+        val now = System.currentTimeMillis()
+        var found = result.logs.sortedByDescending { flightSortKey(it.name, it.file.lastModified(), now) }
 
         // Permissive-OEM detection: if Legacy succeeded on Android 11+,
         // we don't need a SAF grant — lower the banner. If Legacy came
