@@ -4,6 +4,13 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Docs — 2026-09-25 — ROADMAP and Kotlin-resumption plan status lines corrected
+
+Docs-only (no `android/**` change, so no version bump or release fires). `ROADMAP.md` still read
+PR #57 as "pending release" and v1.3.25 as "scheduled"; `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`
+still read "Ready for aegis execution". Both corrected against the GitHub releases (v1.3.24 → v1.3.32,
+latest 2026-07-03) and the code. Operator device checks that were never confirmed stay unchecked.
+
 ### Fixed — 2026-07-03 — flight-log list SORTED by mtime, not by the displayed flight date — a zero-mtime SAF copy sank to the bottom (ADR-0010, sort half)
 
 **Symptom (operator-reported "log timing" anomaly):** after the 2026-07-02 display fix, a SAF flight log whose DJI controller reported `lastModified() == 0` **displayed** the correct flight date (derived from the filename) but **sorted to the very bottom** of the list. The list order no longer matched the visible dates — the newest flight could appear last.

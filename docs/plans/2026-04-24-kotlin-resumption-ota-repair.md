@@ -1,6 +1,6 @@
 # Plan: Kotlin resumption + OTA repair — port v2.62.0 / v2.62.1 behavior into Kotlin, cut v1.3.24
 
-**Status:** Ready for aegis execution
+**Status:** ✅ **COMPLETE — v1.3.24 shipped 2026-04-24** (PR #49 `98ac7a3`; GH release `v1.3.24`, operator-confirmed OTA pickup — see `ROADMAP.md` §v1.3.24, every criterion checked). *Corrected 2026-09-25; this line read "Ready for aegis execution" for five months.* Re-verified in code 2026-09-25: all workflows on `[self-hosted, linux, x64, bos]`, `apksigner`/`aapt` gates in `release.yml`, HTTPS coercion in `ApiClient.kt`, `sensorLandscape` + preflight health gate present, and DroneOpsCommand's `companion/` tree and its workflow deleted. Releases continued through **v1.3.32 (2026-07-03)**. Do not re-execute.
 **Author:** Terry (research + plan)
 **Date:** 2026-04-24
 **Target repo:** `BigBill1418/DroneOpsSync` (native Kotlin, working tree at `/home/bbarnard065/DroneOpsSync`)
