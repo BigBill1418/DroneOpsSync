@@ -4,6 +4,8 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+## [1.3.33] — 2026-10-06 (released 17:39 PDT, PR #61)
+
 ### Fixed — 2026-10-06 — a dead folder grant now re-prompts instead of silently finding nothing
 
 Two DJI Fly controllers stopped uploading with **no server contact at all**: the RC Pro (Mavic 3 Pro,
