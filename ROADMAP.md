@@ -37,9 +37,21 @@ on merge and publishes the release APK; the in-app version display reads it from
 See ADR-0008 + DroneOpsCommand ADR-0023 + shared plan
 `DroneOpsCommand/docs/plans/2026-06-15-device-upload-async-decoupling.md`.
 
-## Current phase — none in flight (corrected 2026-09-25; last release v1.3.32, 2026-07-03)
+## Current phase — v1.3.33 released 2026-10-06; OPERATOR ACTION PENDING on two controllers
 
-*Historical — this was the current phase on 2026-04-24; it shipped as v1.3.25 the same day:* **v1.3.25 — zero-touch device API key rotation.** Scheduled via Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (fired 2026-04-24T18:58Z). Deliverable: PRs on both DroneOpsCommand + DroneOpsSync implementing grace-window dual-key auth + device-side preflight pickup. ADR will land as `docs/adr/0002-zero-touch-device-key-rotation.md` in this repo; corresponding server-side ADR-0003 lives in DroneOpsCommand.
+v1.3.33 (PR #61) fixes the silent-controller bug. A dead SAF folder grant was kept, every scan found
+0 files, and no server request was made. The RC Pro (Mavic 3 Pro, silent since 2026-05-17) and the
+Mavic 4 Pro's controller (silent since 2026-09-19) are both affected.
+
+**Still to do (operator, on each controller):**
+1. Open the app and accept the v1.3.33 OTA.
+2. Tap the "one-time folder grant" banner, or go to Settings → RE-GRANT FLIGHT LOG FOLDER, and allow
+   `Android/data/dji.go.v5/files/FlightRecord`.
+3. Keep the app open while it syncs; there is no background sync.
+
+**Then verify on DroneOpsCommand:** the M3P / M4P device keys' `last_used_at` updates, and the new
+flights arrive linked to the right aircraft. DOC ROADMAP FU-12 tracks this. If a controller still
+finds nothing, use Diagnostics → Export (`[PERM]` / `[SCAN]` lines).
 
 ## v1.3.24 — SHIPPED 2026-04-24
 
