@@ -25,6 +25,7 @@ import com.droneopssync.app.upload.classifyUploadOutcome
 import com.droneopssync.app.upload.reducePerFileState
 import com.droneopssync.app.storage.FlightLogSource
 import com.droneopssync.app.storage.LegacyFileSource
+import com.droneopssync.app.storage.SafGrantPolicy
 import com.droneopssync.app.storage.SafTreeSource
 import com.droneopssync.app.storage.isDeleteEligible
 import com.google.gson.Gson
@@ -397,8 +398,12 @@ class MainViewModel : ViewModel() {
                 val resolvable = runCatching {
                     DocumentFile.fromTreeUri(appContext!!, parsed)?.canRead() == true
                 }.getOrDefault(false)
-                if (!resolvable) {
-                    diag(DiagLevel.WARN, "PERM", "SAF tree URI no longer resolvable — re-grant required")
+                if (SafGrantPolicy.mustRegrant(Build.VERSION.SDK_INT, uriPresent = true, treeReadable = resolvable)) {
+                    // Forget the dead grant so the re-grant banner shows; keeping it made
+                    // every scan return 0 files silently (2026-10-06, SafGrantPolicy).
+                    diag(DiagLevel.WARN, "PERM", "SAF tree URI no longer resolvable — clearing and forcing re-grant")
+                    prefs.edit().remove(PREF_SAF_FLIGHT_LOG_URI).apply()
+                    _safTreeUri.value = null
                 }
                 // ADR-0006: WRITE-flag check. If the persisted grant
                 // lacks WRITE, post-upload delete will silently fail.
@@ -594,6 +599,20 @@ class MainViewModel : ViewModel() {
         // Falls back to mtime for "Unknown date" rows so ordering stays total.
         val now = System.currentTimeMillis()
         var found = result.logs.sortedByDescending { flightSortKey(it.name, it.file.lastModified(), now) }
+
+        // A grant that stopped resolving since launch: forget it and re-prompt
+        // instead of reporting "No log files found" forever (SafGrantPolicy).
+        if (useSaf && found.isEmpty()) {
+            val readable = runCatching {
+                DocumentFile.fromTreeUri(ctx!!, safUri!!)?.canRead() == true
+            }.getOrDefault(false)
+            if (SafGrantPolicy.mustRegrant(Build.VERSION.SDK_INT, uriPresent = true, treeReadable = readable)) {
+                diag(DiagLevel.WARN, "SCAN", "SAF grant unreadable — clearing and forcing re-grant")
+                prefs?.edit()?.remove(PREF_SAF_FLIGHT_LOG_URI)?.apply()
+                _safTreeUri.value = null
+                _needsSafGrant.value = true
+            }
+        }
 
         // Permissive-OEM detection: if Legacy succeeded on Android 11+,
         // we don't need a SAF grant — lower the banner. If Legacy came
