@@ -4,6 +4,29 @@ All notable changes to DroneOpsSync (native Kotlin Android app for DJI controlle
 
 ## [Unreleased]
 
+### Fixed — 2026-10-06 — a dead folder grant now re-prompts instead of silently finding nothing
+
+Two DJI Fly controllers stopped uploading with **no server contact at all**: the RC Pro (Mavic 3 Pro,
+silent since 2026-05-17) and the Mavic 4 Pro's controller (silent since 2026-09-19). DJI Pilot 2
+controllers kept working. DroneOpsCommand saw zero requests from either key and nothing was rejected,
+so the stop was on the device.
+
+**Root cause in the code:** when the persisted SAF tree grant stopped resolving (revoked, or the DJI
+app's data folder recreated by an update), `loadSettings` only logged a diag WARN and kept the dead
+URI. Every scan then returned 0 files, the re-grant banner never re-appeared (its logic ran only when
+no URI was stored), and the operator saw "No log files found — check paths in Settings". With 0 files
+`startAutoFlow` returns before any authenticated request, so the server saw total silence.
+
+**Fix:**
+- New `SafGrantPolicy.mustRegrant`.
+- At load and after any empty SAF scan, an unreadable grant is forgotten and the "needs a one-time
+  folder grant" banner shows again.
+- Tests: `SafGrantPolicyTest` (red → green); all 61 unit tests pass.
+
+**Server side** (DroneOpsCommand v2.97.4): the silence watchdog now alerts daily while a device key
+stays silent. That alert was previously dropped after 7 days, and before 2026-10-06 its title (which
+contains an em dash) was never delivered at all (DOC ADR-0051).
+
 ### Docs — 2026-09-25 — ROADMAP and Kotlin-resumption plan status lines corrected
 
 Docs-only (no `android/**` change, so no version bump or release fires). `ROADMAP.md` still read
